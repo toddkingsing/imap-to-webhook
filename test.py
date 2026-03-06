@@ -2056,6 +2056,87 @@ Test"""
         self.assertIn(result["confidence"], ("high", "medium", "low", "none"))
 
 
+    # -- decorative <hr> tests ------------------------------------------------
+
+    def test_decorative_hr_not_stripped(self):
+        """A website form email with <hr/> separating fields from metadata
+        (IP/Location/Timezone) must NOT be treated as a quote separator."""
+        msg_body = """<html><body>
+<p><b>Name:</b> John Doe</p>
+<p><b>Email:</b> john@example.com</p>
+<p><b>Message:</b> I would like a quote for your product.</p>
+<hr/>
+<p><b>IP Address:</b> 203.0.113.45</p>
+<p><b>Location:</b> Shanghai, China</p>
+<p><b>Timezone:</b> Asia/Shanghai (UTC+8)</p>
+<p><b>Submit time:</b> 2025-03-06 14:30:00</p>
+<p><b>Source page:</b> https://example.com/contact</p>
+</body></html>"""
+        clean, quote = _orig_extract(msg_body)
+        self.assertIn("IP Address", clean)
+        self.assertIn("Location", clean)
+        self.assertIn("Timezone", clean)
+        self.assertIn("Submit time", clean)
+        self.assertEqual(quote, "")
+
+    def test_multiple_decorative_hrs_not_stripped(self):
+        """Multiple decorative <hr> tags separating content sections."""
+        msg_body = """<html><body>
+<h2>Section 1</h2>
+<p>First paragraph content.</p>
+<hr/>
+<h2>Section 2</h2>
+<p>Second paragraph content.</p>
+<hr/>
+<h2>Section 3</h2>
+<p>Third paragraph content.</p>
+</body></html>"""
+        clean, quote = _orig_extract(msg_body)
+        self.assertIn("Section 1", clean)
+        self.assertIn("Section 2", clean)
+        self.assertIn("Section 3", clean)
+        self.assertEqual(quote, "")
+
+    def test_native_hr_with_reply_headers_still_stripped(self):
+        """A native <hr> followed by From/Sent/To/Subject headers should
+        still be recognised as a quote separator."""
+        msg_body = """<html><body>
+<div>Hi, thanks for your reply.</div>
+<hr/>
+<div>
+<b>From:</b> bob@example.com<br/>
+<b>Sent:</b> Thursday, March 6, 2025 10:00 AM<br/>
+<b>To:</b> alice@example.com<br/>
+<b>Subject:</b> Re: Product inquiry<br/>
+</div>
+<div>Original message text here.</div>
+</body></html>"""
+        clean, quote = _orig_extract(msg_body)
+        self.assertIn("thanks for your reply", clean)
+        self.assertNotIn("From:", clean)
+        self.assertNotIn("Original message text", clean)
+        self.assertIn("From:", quote)
+
+    def test_native_hr_with_date_header_stripped(self):
+        """Hotmail-style: native <hr> followed by Date/Subject/From/To."""
+        msg_body = """<html><body>
+<div>My reply content.</div>
+<hr/>
+<div>
+<b>Date:</b> Thu, 6 Mar 2025 10:00:00 +0800<br/>
+<b>Subject:</b> Re: Inquiry<br/>
+<b>From:</b> sender@example.com<br/>
+<b>To:</b> recipient@example.com<br/>
+</div>
+<div>The quoted original message.</div>
+</body></html>"""
+        clean, quote = _orig_extract(msg_body)
+        self.assertIn("My reply content", clean)
+        self.assertNotIn("Date:", clean)
+        self.assertNotIn("quoted original message", clean)
+        self.assertIn("Date:", quote)
+
+
 class TestProcessOrder(unittest.TestCase):
     """F7: PROCESS_ORDER config tests."""
 

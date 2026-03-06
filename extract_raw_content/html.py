@@ -53,7 +53,7 @@ def strip_email_quote(msg_body) -> Tuple[str, str]:
 
 
 def looks_like_quote(tag: Tag) -> bool:  # now top-level
-    if tag.name in {"blockquote", "hr"}:
+    if tag.name == "blockquote":
         return True
     if (tag.get("id") or "").lower() in {
         "gmail_quote",
@@ -192,7 +192,9 @@ def _preprocess_outlook(soup: BeautifulSoup) -> None:
         return any(w in tag.get_text(" ", strip=True).lower() for w in HDR_WORDS)
 
     for divider in soup.find_all(is_divider):
-        divider.insert_before(soup.new_tag("hr"))
+        marker = soup.new_tag("hr")
+        marker["data-synthetic"] = "outlook"
+        divider.insert_before(marker)
         return
 
     # ..................................................................
@@ -207,17 +209,91 @@ def _preprocess_outlook(soup: BeautifulSoup) -> None:
 
     header = soup.find(is_header_para)
     if header is not None:
-        header.insert_before(soup.new_tag("hr"))
+        marker = soup.new_tag("hr")
+        marker["data-synthetic"] = "outlook"
+        header.insert_before(marker)
+
+
+_HR_VALIDATION_WORDS = {
+    # English
+    "from:",
+    "sent:",
+    "to:",
+    "subject:",
+    "date:",
+    # Polish
+    "od:",
+    "wysłano:",
+    "temat:",
+    # Russian
+    "от:",
+    "отправлено:",
+    "кому:",
+    "тема:",
+    # Chinese
+    "发件人:",
+    "發件人:",
+    "收件人:",
+    "主题:",
+    "主題:",
+    "发件人：",
+    "發件人：",
+    "收件人：",
+    "主题：",
+    "主題：",
+    # Japanese
+    "差出人:",
+    "宛先:",
+    "件名:",
+    "差出人：",
+    "宛先：",
+    "件名：",
+    # Korean
+    "보낸 사람:",
+    "받는 사람:",
+    "제목:",
+    "보낸 사람：",
+    "받는 사람：",
+    "제목：",
+    # Spanish / Portuguese / Italian
+    "de:",
+    "enviado:",
+    "para:",
+    "asunto:",
+    "assunto:",
+    "da:",
+    "inviato:",
+    "oggetto:",
+}
 
 
 def _harvest_from_first_hr(soup: BeautifulSoup, bucket: list[str]) -> None:
     """
     Move the first <hr> *and everything that follows it* into *bucket*,
     then delete those nodes from *soup*.
+
+    Synthetic <hr> tags (injected by ``_preprocess_outlook``) are trusted
+    unconditionally.  Native <hr> tags are only treated as quote separators
+    when the text immediately following them contains mail-header keywords
+    (From:/To:/Subject:/Date: etc.).
     """
     hr = soup.find("hr")
     if hr is None:
         return
+
+    # Native <hr> (no data-synthetic) — validate before cutting
+    if not hr.get("data-synthetic"):
+        following_text = ""
+        for sibling in hr.next_elements:
+            if isinstance(sibling, NavigableString):
+                following_text += str(sibling)
+            elif isinstance(sibling, Tag):
+                following_text += sibling.get_text(" ", strip=False)
+            if len(following_text) >= 500:
+                break
+        following_lower = following_text[:500].lower()
+        if not any(w in following_lower for w in _HR_VALIDATION_WORDS):
+            return  # decorative <hr>, leave it alone
 
     # include the <hr> itself and every successor in document order
     nodes = [hr] + list(hr.next_elements)
