@@ -1,0 +1,42 @@
+From: =?UTF-8?B?5byg5LiJ?= <zhangsan@example.com>
+To: =?UTF-8?B?5p2O5Zub?= <lisi@example.com>
+Subject: =?UTF-8?B?5Zue5aSN77ya5Lqn5ZOB5oql5Lu3?=
+Date: Mon, 15 Jan 2024 10:30:00 +0800
+Message-ID: <reply001@example.com>
+In-Reply-To: <original001@example.com>
+References: <original001@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+好的，我已经收到报价单，稍后回复。
+
+在 2024年1月14日，李四 <lisi@example.com> 写道:
+
+> 请查收附件中的产品报价单。
+> 如有疑问请随时联系。
+>
+> 李四
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+<html>
+<body>
+<div>好的，我已经收到报价单，稍后回复。</div>
+<div class="gmail_quote">
+<div>在 2024年1月14日，李四 &lt;lisi@example.com&gt; 写道:</div>
+<blockquote>
+<div>请查收附件中的产品报价单。</div>
+<div>如有疑问请随时联系。</div>
+<div>李四</div>
+</blockquote>
+</div>
+</body>
+</html>
+
+--boundary123--

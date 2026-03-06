@@ -1,5 +1,33 @@
+# Python
 __pycache__/
-.env
-.idea
-.vscode/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
 venv/
+.venv/
+
+# Environment variables (contains IMAP passwords, webhook URLs)
+env/
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code (contains server IPs, DB credentials, internal architecture)
+.claude/
+CLAUDE.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

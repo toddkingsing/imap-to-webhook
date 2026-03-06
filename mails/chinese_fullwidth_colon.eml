@@ -1,0 +1,28 @@
+From: =?UTF-8?B?5byg5LiJ?= <zhangsan@example.com>
+To: =?UTF-8?B?5p2O5Zub?= <lisi@example.com>
+Subject: =?UTF-8?B?5Zue5aSNOiDmiqXku7fljZXnoa7orqQ=?=
+Date: Tue, 15 Jan 2024 10:30:00 +0800
+Message-ID: <fullwidth001@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary_fullwidth"
+
+--boundary_fullwidth
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+5pS25Yiw77yM6LCi6LCi44CCCgrlj5Hku7bkurrvvJogbGlzaUBleGFtcGxlLmNvbQrlj5HpgIHm
+l7bpl7TvvJogMjAyNOW5tDHmnIgxNOaXpSAxNTowMArmlLbku7bkurrvvJogemhhbmdzYW5AZXhh
+bXBsZS5jb20K5Li76aKY77yaIOaKpeS7t+WNlQoK6K+35p+l5pS26ZmE5Lu244CC
+
+--boundary_fullwidth
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+CjxkaXY+5pS25Yiw77yM6LCi6LCi44CCPC9kaXY+CjxkaXYgc3R5bGU9ImJv
+cmRlci10b3A6IHNvbGlkICNCNUM0REYgMS4wcHQ7IHBhZGRpbmc6IDMuMHB0IDAgMCAwOyI+Cjxw
+PjxiPuWPkeS7tuS6uu+8mjwvYj4gbGlzaUBleGFtcGxlLmNvbTxici8+CjxiPuWPkemAgeaXtumX
+tO+8mjwvYj4gMjAyNOW5tDHmnIgxNOaXpSAxNTowMDxici8+CjxiPuaUtuS7tuS6uu+8mjwvYj4g
+emhhbmdzYW5AZXhhbXBsZS5jb208YnIvPgo8Yj7kuLvpopjvvJo8L2I+IOaKpeS7t+WNlTwvcD4K
+PC9kaXY+CjxkaXY+6K+35p+l5pS26ZmE5Lu244CCPC9kaXY+CjwvYm9keT48L2h0bWw+
+
+--boundary_fullwidth--

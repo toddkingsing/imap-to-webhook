@@ -1,0 +1,41 @@
+From: =?UTF-8?B?5byg5LiJ?= <zhangsan@example.com>
+To: =?UTF-8?B?5p2O5Zub?= <lisi@example.com>
+Subject: =?UTF-8?B?5Zue5aSN77ya5Lqn5ZOB5oql5Lu3?=
+Date: Mon, 15 Jan 2024 10:30:00 +0800
+Message-ID: <reply002@example.com>
+In-Reply-To: <original002@example.com>
+References: <original002@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary456"
+
+--boundary456
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+好的，收到。
+
+发件人: 李四 <lisi@example.com>
+发送时间: 2024年1月14日 15:00
+收件人: 张三 <zhangsan@example.com>
+主题: 产品报价
+
+请查收附件中的产品报价单。
+
+--boundary456
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+<html>
+<body>
+<div>好的，收到。</div>
+<div style="border-top: solid #B5C4DF 1.0pt; padding: 3.0pt 0cm 0cm 0cm">
+<p><b>发件人:</b> 李四 &lt;lisi@example.com&gt;<br/>
+<b>发送时间:</b> 2024年1月14日 15:00<br/>
+<b>收件人:</b> 张三 &lt;zhangsan@example.com&gt;<br/>
+<b>主题:</b> 产品报价</p>
+</div>
+<div>请查收附件中的产品报价单。</div>
+</body>
+</html>
+
+--boundary456--

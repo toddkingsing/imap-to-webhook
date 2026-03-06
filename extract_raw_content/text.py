@@ -132,7 +132,7 @@ def extract_non_quoted_from_plain(msg_body):
     return msg_body
 
 
-def exctract_quoted_from_plain(msg_body, non_quoted=""):
+def extract_quoted_from_plain(msg_body, non_quoted=""):
     """Extracts a quoted message from provided plain text."""
     non_quoted_lines = non_quoted.splitlines()
     for line in non_quoted_lines:

@@ -18,7 +18,7 @@ def _replace_link_brackets(msg_body):
 
     def link_wrapper(link):
         newline_index = msg_body[: link.start()].rfind("\n")
-        if msg_body[newline_index + 1] == ">":
+        if newline_index >= 0 and msg_body[newline_index + 1] == ">":
             return link.group()
         else:
             return "@@%s@@" % link.group(1)

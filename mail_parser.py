@@ -2,6 +2,8 @@ import base64
 import binascii
 import gzip
 import json
+import logging
+import os
 import quopri
 import re
 import uuid
@@ -18,7 +20,7 @@ from html2text import html2text
 
 from extract_raw_content.html import strip_email_quote
 from extract_raw_content.text import (
-    exctract_quoted_from_plain,
+    extract_quoted_from_plain,
     extract_non_quoted_from_plain,
 )
 
@@ -35,6 +37,7 @@ GZ_MIME = "application/gzip"
 EML_MIME = "message/rfc822"
 BINARY_MIME = "application/octet-stream"
 _BASIC_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")  # intentionally permissive
+_CTE_78BIT_RE = re.compile(rb"^Content-Transfer-Encoding:\s*[78]bit\b", re.I | re.M)
 
 
 def validate_and_normalize(addr: str) -> str | None:
@@ -105,6 +108,19 @@ def extract_emails(source):
     return [x for x in normalized if x]
 
 
+def extract_addresses(source) -> list[dict]:
+    """Return [{"email": "normalized@addr", "name": "Display Name"}, ...]"""
+    pairs = _coerce_addresses(source)
+    result = []
+    for name, email in pairs:
+        if not email:
+            continue
+        normalized = validate_and_normalize(email)
+        if normalized:
+            result.append({"email": normalized, "name": (name or "").strip()})
+    return result
+
+
 def get_text(mail):
     raw_content, html_content, plain_content, html_quote, plain_quote = (
         "",
@@ -117,13 +133,15 @@ def get_text(mail):
     if mail.text_html:
         raw_content = "".join(mail.text_html).replace("\r\n", "\n")
         html_content, html_quote = strip_email_quote(raw_content)
-        # extract_from_html(raw_content)
         plain_content = html2text(html_content)
 
     if mail.text_plain or not plain_content:
-        raw_content = "".join(mail.text_plain)
-        plain_content = extract_non_quoted_from_plain(raw_content)
-        plain_quote = exctract_quoted_from_plain(raw_content, plain_content)
+        raw_text = "".join(mail.text_plain or [])
+        text_plain_content = extract_non_quoted_from_plain(raw_text)
+        plain_quote = extract_quoted_from_plain(raw_text, text_plain_content)
+        if not plain_content:
+            # Only use text_plain content when HTML didn't produce any
+            plain_content = text_plain_content
 
     # 'content' item holds plain_content and 'quote' item holds plain_quote
     # (with HTML stripped off).
@@ -137,7 +155,7 @@ def get_text(mail):
 
 
 def get_auto_reply_type(mail):
-    if "report-type=disposition-notification" in mail.content_type:
+    if mail.content_type and "report-type=disposition-notification" in mail.content_type:
         return "disposition-notification"
     if mail.auto_submitted and mail.auto_submitted.lower() == "auto-replied":
         return "vacation-reply"
@@ -183,16 +201,19 @@ def get_attachments(mail):
             raise Exception(msg)
         decoder = decoder_map[attachment["content_transfer_encoding"]]
 
-        filename = attachment["filename"]
+        filename = attachment["filename"] or f"attachment_{uuid.uuid4().hex[:8]}"
+        filename = os.path.basename(filename)
+        if not filename or len(filename) > 255:
+            filename = f"attachment_{uuid.uuid4().hex[:8]}"
 
         try:
             content = decoder(attachment["payload"])
             attachments.append((filename, BytesIO(content), BINARY_MIME))
         except (binascii.Error, ValueError):
-            print(
-                "Unable to parse attachment '{}' in {} \n".format(
-                    filename, mail.message_id
-                )
+            logging.getLogger("imap-to-webhook").warning(
+                "Unable to parse attachment '%s' in %s",
+                filename,
+                mail.message_id,
             )
     return attachments
 
@@ -235,7 +256,9 @@ def _pick_addresses(*candidates):
     return None
 
 
-def get_manifest(mail, compress_eml):
+def get_manifest(mail, compress_eml, raw_bytes=None):
+    from fingerprint import extract_fingerprint
+
     from_source = _pick_addresses(
         getattr(mail, "_from", None),  # prefer _from
         getattr(mail, "from_", None),  # then from_
@@ -243,23 +266,35 @@ def get_manifest(mail, compress_eml):
         getattr(mail, "headers", {}).get("From"),
         getattr(mail, "mail", {}).get("from"),
     )
-    from_result = extract_emails(from_source)
     return {
         "headers": {
             "subject": mail.subject,
-            "to": extract_emails(mail.to),
-            "to+": get_to_plus(mail),
-            "from": from_result,
-            "date": mail.date.isoformat() if mail.date else [],
-            "cc": extract_emails(mail.cc),
+            "to": extract_addresses(mail.to),
+            "from": extract_addresses(from_source),
+            "date": mail.date.isoformat() if mail.date else None,
+            "cc": extract_addresses(mail.cc),
             "message_id": mail.message_id,
+            "in_reply_to": mail.in_reply_to or None,
+            "references": (
+                mail.references.split()
+                if isinstance(mail.references, str)
+                else list(mail.references)
+            )
+            if mail.references
+            else [],
             "auto_reply_type": get_auto_reply_type(mail),
         },
-        "version": "v2",
+        "version": "v3",
         "text": get_text(mail),
         "files_count": len(mail.attachments),
         "eml": {
             "compressed": compress_eml,
+        },
+        "fingerprint": extract_fingerprint(raw_bytes) if raw_bytes else {
+            "ip": "",
+            "confidence": "none",
+            "is_user_ip": False,
+            "provider_detected": "",
         },
     }
 
@@ -347,7 +382,6 @@ def parse_mail_from_bytes(raw_bytes):
     mp = _patch_addresses_from_stdlib(mp, raw_bytes)
 
     # Fast-exit if the message never uses 7bit/8bit encodings
-    _CTE_78BIT_RE = re.compile(rb"^Content-Transfer-Encoding:\s*[78]bit\b", re.I | re.M)
     if not _CTE_78BIT_RE.search(raw_bytes):
         return mp
 
@@ -386,7 +420,7 @@ def serialize_mail(raw_mail, compress_eml=False):
     mail = parse_mail_from_bytes(raw_mail)
     files = []
     # Build manifest
-    body = get_manifest(mail, compress_eml)
+    body = get_manifest(mail, compress_eml, raw_mail)
     files.append(
         (
             "manifest",
@@ -413,5 +447,5 @@ if __name__ == "__main__":
     with open(sys.argv[1], "rb") as fp:
         raw_mail = fp.read()
         mail = parse_mail_from_bytes(raw_mail)
-        body = get_manifest(mail, False)
+        body = get_manifest(mail, False, raw_mail)
         json.dump(body, sys.stdout, indent=4)

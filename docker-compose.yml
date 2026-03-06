@@ -1,26 +1,35 @@
----
-version: '3'
-services:
+name: imap-to-webhook
 
-  daemon:
-    build: .
-    environment:
-      IMAP_URL: ${IMAP_URL}
-      WEBHOOK_URL: http://mock:5000/
-      ON_SUCCESSS: 'delete'
+services:
+  imap_to_webhook:
+    build:
+      context: .
+    container_name: imap-to-webhook
+    env_file:
+      - ./env/aggregator.env
     volumes:
       - .:/usr/src/app
+    restart: unless-stopped
     networks:
-      - imap-to-webhook-network
-
-  mock:
-    build:
-      context: mock
-    ports:
-      - 5000:5000
-    networks:
-      - imap-to-webhook-network
+      - ai-network
+    command: python daemon.py
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 120s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
-  imap-to-webhook-network:
-    driver: bridge
+  ai-network:
+    external: true
+

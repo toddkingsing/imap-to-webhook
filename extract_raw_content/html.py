@@ -123,6 +123,59 @@ def _preprocess_outlook(soup: BeautifulSoup) -> None:
         "кому:",
         "копия:",
         "тема:",
+        # Chinese (simplified + traditional)
+        "发件人:",
+        "發件人:",
+        "收件人:",
+        "发送时间:",
+        "發送時間:",
+        "主题:",
+        "主題:",
+        "抄送:",
+        "日期:",
+        # Chinese fullwidth colon variants
+        "发件人：",
+        "發件人：",
+        "收件人：",
+        "发送时间：",
+        "發送時間：",
+        "主题：",
+        "主題：",
+        "抄送：",
+        "日期：",
+        # Japanese
+        "差出人:",
+        "宛先:",
+        "送信日時:",
+        "件名:",
+        # Japanese fullwidth colon variants
+        "差出人：",
+        "宛先：",
+        "送信日時：",
+        "件名：",
+        # Korean
+        "보낸 사람:",
+        "받는 사람:",
+        "보낸 날짜:",
+        "제목:",
+        "참조:",
+        # Korean fullwidth colon variants
+        "보낸 사람：",
+        "받는 사람：",
+        "보낸 날짜：",
+        "제목：",
+        "참조：",
+        # Spanish
+        "de:",
+        "enviado:",
+        "para:",
+        "asunto:",
+        # Portuguese
+        "assunto:",
+        # Italian
+        "da:",
+        "inviato:",
+        "oggetto:",
     }
 
     # ..................................................................
@@ -167,12 +220,21 @@ def _harvest_from_first_hr(soup: BeautifulSoup, bucket: list[str]) -> None:
         return
 
     # include the <hr> itself and every successor in document order
-    for node in [hr] + list(hr.next_elements):
-        if isinstance(node, (Tag, NavigableString)):
-            _safe_append(
-                bucket, _outer_html(node) if isinstance(node, Tag) else str(node)
-            )
-            node.extract()
+    nodes = [hr] + list(hr.next_elements)
+    covered = set()
+    for node in nodes:
+        if not isinstance(node, (Tag, NavigableString)):
+            continue
+        if id(node) in covered:
+            continue
+        _safe_append(
+            bucket, _outer_html(node) if isinstance(node, Tag) else str(node)
+        )
+        # Mark all descendants as covered to avoid duplicate extraction
+        if isinstance(node, Tag):
+            for desc in node.descendants:
+                covered.add(id(desc))
+        node.extract()
 
 
 def _outer_html(tag: Tag) -> str:
