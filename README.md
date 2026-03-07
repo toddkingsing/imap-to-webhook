@@ -2,7 +2,7 @@
 
 Poll one or more IMAP mailboxes, parse each email into structured data, and deliver it to an HTTP endpoint as `multipart/form-data`.
 
-Forked from [watchdogpolska/imap-to-webhook](https://github.com/watchdogpolska/imap-to-webhook). This fork adds multi-account support, batch processing, webhook retries, IP fingerprinting, Chinese email quote detection, a v3 manifest format, and Python 3.14 compatibility.
+Originally forked from [watchdogpolska/imap-to-webhook](https://github.com/watchdogpolska/imap-to-webhook), now substantially rewritten with multi-account support, configurable noop tracking, batch processing, webhook retries, IP fingerprinting, multilingual quote detection (Chinese/Japanese/Korean/Spanish/Portuguese/Italian/...), a v3 manifest format, and Python 3.14 compatibility.
 
 ```
 ┌───────────┐      ┌──────────────┐      ┌──────────────┐
@@ -10,8 +10,8 @@ Forked from [watchdogpolska/imap-to-webhook](https://github.com/watchdogpolska/i
 │ mailboxes ├─────►│ parse + send ├─────►│   endpoint   │
 └───────────┘      └──────┬───────┘      └──────────────┘
                           │
-              on success: move / delete / mark read
-              on failure: move to ERROR folder
+              on success: move / delete / mark processed
+              on failure: move to ERROR (3-tier fallback)
 ```
 
 ## Quick start
@@ -25,7 +25,7 @@ mkdir -p env
 cp .env.sample env/aggregator.env
 # Edit env/aggregator.env — fill in IMAP_URL and WEBHOOK_URL
 
-# Run (edit docker-compose.yml if needed)
+# Run
 docker compose up -d --build
 
 # Verify
@@ -59,15 +59,15 @@ To monitor multiple mailboxes from a single container, use numbered variables `I
 
 | Variable | Description |
 |----------|-------------|
-| `IMAP_URL` | IMAP connection URL (see format above) |
+| `IMAP_URL` | IMAP connection URL (see format above). Ignored when `IMAP_URL_1` exists |
 | `WEBHOOK_URL` | HTTP(S) endpoint that receives parsed emails |
 
 **Processing:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ON_SUCCESS` | `move` | After successful delivery: `move`, `delete`, or `noop` (mark as read, leave in inbox) |
-| `NOOP_FLAG` | `\Seen` | IMAP flag for noop mode tracking (`$WebhookProcessed` if other clients read mail) |
+| `ON_SUCCESS` | `move` | After successful delivery: `move`, `delete`, or `noop` (mark processed, leave in inbox) |
+| `NOOP_FLAG` | `\Seen` | IMAP flag used in noop mode. Set to a custom keyword (e.g. `$WebhookProcessed`) if other mail clients also access the mailbox. Requires server support for custom keywords (`\*` in PERMANENTFLAGS) |
 | `COMPRESS_EML` | `false` | Gzip-compress the raw `.eml` attachment |
 | `DELAY` | `60` | Seconds to wait between poll cycles when the inbox is empty |
 | `IMAP_TIMEOUT` | `60` | IMAP connection and socket timeout (seconds) |
@@ -171,7 +171,7 @@ loop() — repeats until shutdown signal (SIGTERM / SIGINT):
 │
 ├── For each IMAP account:
 │   ├── Connect → LOGIN → SELECT inbox
-│   ├── UID SEARCH (ALL, UNSEEN, or UNKEYWORD in noop mode)
+│   ├── UID SEARCH (ALL, UNSEEN, or UNKEYWORD depending on mode and NOOP_FLAG)
 │   ├── Batch download up to BATCH_SIZE messages
 │   │
 │   ├── For each downloaded message:
@@ -179,9 +179,9 @@ loop() — repeats until shutdown signal (SIGTERM / SIGINT):
 │   │   ├── serialize_mail() → multipart/form-data body
 │   │   ├── POST to WEBHOOK_URL
 │   │   │   ├── 2xx           → move to SUCCESS / delete / mark processed
-│   │   │   ├── 4xx + REFUSED → move to REFUSED
+│   │   │   ├── 4xx + REFUSED → move to REFUSED → fallback ERROR → last resort
 │   │   │   ├── 5xx           → retry with exponential backoff
-│   │   │   └── final failure → move to ERROR
+│   │   │   └── final failure → move to ERROR → fallback last resort
 │   │   └── Wait DELIVERY_INTERVAL (if batching)
 │   │
 │   └── EXPUNGE → CLOSE → LOGOUT
@@ -193,18 +193,19 @@ loop() — repeats until shutdown signal (SIGTERM / SIGINT):
 
 When messages are present, the daemon processes them immediately without sleeping — it only pauses when all inboxes are empty.
 
+All IMAP folder operations have a **3-tier fallback**: target folder → ERROR folder → last-resort flag marking (`\Deleted` or the configured `NOOP_FLAG`).
+
 ## Testing
 
 ```bash
-# Build the testing image stage — runs all tests at build time (recommended)
+# Recommended: build the testing stage (runs all 216 tests at build time)
 docker build --target testing -t imap-to-webhook-test .
 
-# Or run inside a running container
-docker exec imap-to-webhook python test.py
+# Or use the Makefile shortcut
+make test
 
-# Or run locally (Python 3.12+)
-pip install -r requirements.txt
-python test.py
+# Or run inside a running container (requires correct volume mount)
+docker exec imap-to-webhook python test.py
 ```
 
 ## Project structure
@@ -217,19 +218,20 @@ python test.py
 ├── fingerprint.py             # Sender IP extraction from email headers
 ├── healthcheck.py             # Docker HEALTHCHECK script
 ├── stats.py                   # Runtime statistics counter
-├── version.py                 # Version string (1.3.0)
+├── version.py                 # Version string
 │
 ├── extract_raw_content/       # Email body / quote separation
-│   ├── constants.py           #   Quote detection regex (EN/DE/FR/NL/ZH/JA/KO/...)
+│   ├── constants.py           #   Quote detection regex (EN/DE/FR/NL/ZH/JA/KO/ES/PT/IT/...)
 │   ├── html.py                #   HTML quote stripping (BeautifulSoup)
 │   ├── text.py                #   Plain text quote extraction
 │   └── utils.py               #   Preprocessing (link normalization, splitter detection)
 │
-├── test.py                    # Unit tests
+├── test.py                    # 216 unit tests (10 test classes)
 ├── mails/                     # Test .eml and HTML samples
 ├── Dockerfile                 # Dev image (CMD: sleep infinity for debugging)
 ├── Dockerfile.production      # Prod image (CMD: python daemon.py)
 ├── docker-compose.yml         # Docker Compose config
+├── Makefile                   # Shortcuts: make start/stop/build/test/lint
 ├── .env.sample                # Environment variable template
 └── env/
     └── aggregator.env         # Your actual env file (gitignored)
@@ -256,14 +258,6 @@ services:
       context: .
       dockerfile: Dockerfile.production
     # Remove the volumes section — production image has code baked in
-```
-
-## Upstream sync
-
-```bash
-git remote add upstream https://github.com/watchdogpolska/imap-to-webhook.git
-git fetch upstream
-git merge upstream/master
 ```
 
 ## License
