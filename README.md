@@ -228,8 +228,6 @@ python test.py
 │
 ├── test.py                    # Unit tests
 ├── mails/                     # Test .eml and HTML samples
-├── mock/                      # Flask mock webhook server for development
-│
 ├── Dockerfile                 # Dev image (CMD: sleep infinity for debugging)
 ├── Dockerfile.production      # Prod image (CMD: python daemon.py)
 ├── docker-compose.example.yml # Compose template
