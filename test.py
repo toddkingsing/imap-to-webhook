@@ -1641,6 +1641,85 @@ that this line is intact."""
         self.assertEqual("已确认。", text.extract_non_quoted_from_plain(msg_body))
 
     # ---------------------------------------------------------------
+    # NetEase enterprise mail quote detection
+    # ---------------------------------------------------------------
+    def test_netease_bare_span_header(self):
+        """NetEase Type B: bare <span> header fields trigger quote separation."""
+        html_body = """<div>
+<p>好的，已确认收到。</p>
+<span style="font-family:'Microsoft JhengHei'">发件人：</span>
+<span>张三 &lt;</span><a href="mailto:zhang@example.com">zhang@example.com</a><span>&gt;</span><br>
+<span style="font-family:'Microsoft JhengHei'">发送日期：</span>
+<span>2026-02-15 18:40:10</span><br>
+<span style="font-family:'MS Gothic'">收件人：</span>
+<span>李四 &lt;li@example.com&gt;</span><br>
+<span style="font-family:'MS Gothic'">主</span>
+<span style="font-family:'Microsoft JhengHei'">题：</span>
+<span>报价确认</span>
+<blockquote style="border-left:solid #CCCCCC 1.0pt">
+<p>请查收附件中的报价单。</p>
+</blockquote>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("已确认收到", clean)
+        self.assertNotIn("发件人", clean)
+        self.assertNotIn("报价单", clean)
+        self.assertIn("发件人", quote)
+
+    def test_netease_with_outlook_type_a_already_present(self):
+        """When Outlook Type A header exists, NetEase Type B is also captured."""
+        html_body = """<div>
+<p>Thank you for the update.</p>
+<div style="border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0in 0in 0in">
+<p><b>From:</b> Alice &lt;alice@example.com&gt;<br>
+<b>Sent:</b> Friday, March 7, 2026<br>
+<b>To:</b> Bob &lt;bob@example.com&gt;<br>
+<b>Subject:</b> Re: Quote</p>
+</div>
+<p>Previous email body here.</p>
+<span style="font-family:'Microsoft JhengHei'">发件人：</span>
+<span>王五</span><br>
+<span style="font-family:'Microsoft JhengHei'">发送日期：</span>
+<span>2026-02-14</span><br>
+<span style="font-family:'MS Gothic'">收件人：</span>
+<span>Alice</span><br>
+<span style="font-family:'MS Gothic'">主题：</span>
+<span>Quote</span>
+<blockquote><p>Oldest email content.</p></blockquote>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("Thank you", clean)
+        self.assertNotIn("Previous email", clean)
+        self.assertNotIn("发件人", clean)
+
+    def test_netease_span_no_false_positive(self):
+        """A lone span with '收件人:' in body text should NOT trigger separation."""
+        html_body = """<div>
+<p>请将收件人：张三 加入抄送列表。</p>
+<p>谢谢。</p>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("收件人", clean)
+        self.assertIn("谢谢", clean)
+
+    # ---------------------------------------------------------------
+    # ProtonMail quote detection
+    # ---------------------------------------------------------------
+    def test_protonmail_quote(self):
+        """ProtonMail quote block with class='protonmail_quote' is separated."""
+        html_body = """<div>
+<p>Thanks for the info.</p>
+<div class="protonmail_quote">
+<p>On Jan 15, Alice wrote:</p>
+<p>Here is the document you requested.</p>
+</div>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("Thanks for the info", clean)
+        self.assertNotIn("document you requested", clean)
+        self.assertIn("document you requested", quote)
+
+    # ---------------------------------------------------------------
     # Japanese quote detection
     # ---------------------------------------------------------------
     def test_japanese_original_message_plain_text(self):

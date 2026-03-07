@@ -71,6 +71,7 @@ def looks_like_quote(tag: Tag) -> bool:  # now top-level
             "yahoo_quoted",
             "js-email-quote",
             "outlookmessageheader",
+            "protonmail_quote",
         )
     ):
         return True
@@ -229,6 +230,47 @@ def _preprocess_outlook(soup: BeautifulSoup) -> None:
         marker = soup.new_tag("hr")
         marker["data-synthetic"] = "outlook"
         header.insert_before(marker)
+        return
+
+    # ..................................................................
+    #  2c · NetEase enterprise mail — bare <span> header fields
+    # ..................................................................
+    # NetEase puts forward headers as bare <span> siblings (not wrapped
+    # in <p>/<div>), e.g.:
+    #   <span style="font-family:'Microsoft JhengHei'">发件人：</span>
+    #   <span>Name</span><br>
+    #   <span style="font-family:'MS Gothic'">收件人：</span>...
+    # We detect the first such span and verify that sibling text contains
+    # additional header keywords to avoid false positives.
+    def is_header_span(tag: Tag) -> bool:
+        if tag.name != "span":
+            return False
+        text = tag.get_text(strip=True).lower()
+        starter = None
+        for w in HDR_WORDS:
+            if text.startswith(w):
+                starter = w
+                break
+        if starter is None:
+            return False
+        if starter in _AMBIGUOUS_STARTERS:
+            return False  # bare spans with "to:" etc. are too risky
+        # Verify siblings contain more header keywords
+        sibling_text = ""
+        for sib in tag.next_siblings:
+            if isinstance(sib, Tag):
+                sibling_text += sib.get_text(" ", strip=True).lower()
+            elif isinstance(sib, NavigableString):
+                sibling_text += str(sib).lower()
+            if len(sibling_text) >= 500:
+                break
+        return sum(1 for w in HDR_WORDS if w in sibling_text) >= 2
+
+    span_header = soup.find(is_header_span)
+    if span_header is not None:
+        marker = soup.new_tag("hr")
+        marker["data-synthetic"] = "netease"
+        span_header.insert_before(marker)
 
 
 _HR_VALIDATION_WORDS = {
