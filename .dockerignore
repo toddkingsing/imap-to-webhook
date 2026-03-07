@@ -1,5 +1,4 @@
 .git
-.github
 .claude
 .vscode
 .idea
@@ -14,8 +13,6 @@ docs/
 .gitignore
 .dockerignore
 .pre-commit-config.yaml
-.pyup.yml
-renovate.json
 
 docker-compose*.yml
 Makefile

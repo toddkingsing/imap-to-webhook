@@ -6,12 +6,10 @@ services:
       context: .
     container_name: imap-to-webhook
     env_file:
-      - ./env/aggregator.env
+      - .env.example
     volumes:
       - .:/usr/src/app
     restart: unless-stopped
-    networks:
-      - ai-network
     command: python daemon.py
     healthcheck:
       test: ["CMD", "python", "healthcheck.py"]
@@ -29,7 +27,11 @@ services:
         max-size: "10m"
         max-file: "3"
 
-networks:
-  ai-network:
-    external: true
+    # Uncomment to join an external Docker network:
+    # networks:
+    #   - ai-network
 
+# Uncomment if using an external network:
+# networks:
+#   ai-network:
+#     external: true

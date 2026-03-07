@@ -16,6 +16,11 @@ venv/
 env/
 .env
 *.env
+!.env.example
+
+# Local Docker Compose (may contain network/volume overrides)
+docker-compose.yml
+docker-compose.override.yml
 
 # IDE
 .idea/

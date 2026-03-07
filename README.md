@@ -21,9 +21,10 @@ git clone https://github.com/toddkingsing/imap-to-webhook.git
 cd imap-to-webhook
 
 # Configure
-mkdir -p env
-cp .env.sample env/aggregator.env
-# Edit env/aggregator.env — fill in IMAP_URL and WEBHOOK_URL
+cp .env.example .env
+cp docker-compose.example.yml docker-compose.yml
+# Edit .env — fill in IMAP_URL and WEBHOOK_URL
+# Edit docker-compose.yml — adjust network/volumes if needed
 
 # Run
 docker compose up -d --build
@@ -34,7 +35,7 @@ docker logs -f imap-to-webhook
 
 ## Configuration
 
-All settings are environment variables. See [`.env.sample`](.env.sample) for the full annotated template.
+All settings are environment variables. See [`.env.example`](.env.example) for the full annotated template.
 
 ### IMAP URL
 
@@ -230,11 +231,9 @@ docker exec imap-to-webhook python test.py
 ├── mails/                     # Test .eml and HTML samples
 ├── Dockerfile                 # Dev image (CMD: sleep infinity for debugging)
 ├── Dockerfile.production      # Prod image (CMD: python daemon.py)
-├── docker-compose.yml         # Docker Compose config
+├── docker-compose.example.yml # Compose template (cp to docker-compose.yml)
 ├── Makefile                   # Shortcuts: make start/stop/build/test/lint
-├── .env.sample                # Environment variable template
-└── env/
-    └── aggregator.env         # Your actual env file (gitignored)
+└── .env.example               # Environment variable template (cp to .env)
 ```
 
 ## Production deployment
@@ -244,7 +243,7 @@ Use `Dockerfile.production` — code is copied into the image, no volume mount r
 ```bash
 docker build -f Dockerfile.production -t imap-to-webhook:prod .
 docker run -d --name imap-to-webhook \
-  --env-file ./env/aggregator.env \
+  --env-file .env \
   --restart unless-stopped \
   imap-to-webhook:prod
 ```
