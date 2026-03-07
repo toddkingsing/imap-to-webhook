@@ -25,8 +25,7 @@ mkdir -p env
 cp .env.sample env/aggregator.env
 # Edit env/aggregator.env — fill in IMAP_URL and WEBHOOK_URL
 
-# Run
-cp docker-compose.example.yml docker-compose.yml
+# Run (edit docker-compose.yml if needed)
 docker compose up -d --build
 
 # Verify
@@ -230,7 +229,7 @@ python test.py
 ├── mails/                     # Test .eml and HTML samples
 ├── Dockerfile                 # Dev image (CMD: sleep infinity for debugging)
 ├── Dockerfile.production      # Prod image (CMD: python daemon.py)
-├── docker-compose.example.yml # Compose template
+├── docker-compose.yml         # Docker Compose config
 ├── .env.sample                # Environment variable template
 └── env/
     └── aggregator.env         # Your actual env file (gitignored)

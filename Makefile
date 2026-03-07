@@ -1,23 +1,20 @@
 start:
-	docker-compose up
+	docker compose up -d
 
 stop:
-	docker-compose stop
+	docker compose stop
 
 clean:
-	docker-compose down
+	docker compose down
 
 build:
-	docker-compose build
+	docker compose up -d --build
 
 test:
-	docker-compose run --rm daemon python test.py
+	docker build --target testing -t imap-to-webhook-test .
 
-lint: # lint currently staged files
+lint:
 	pre-commit run
 
-lint-all: # lint all files in repository
+lint-all:
 	pre-commit run --all-files
-
-code-syle-check:
-	docker-compose run daemon pre-commit run --all-files
