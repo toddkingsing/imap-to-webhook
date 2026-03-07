@@ -238,26 +238,14 @@ docker exec imap-to-webhook python test.py
 
 ## Production deployment
 
-Use `Dockerfile.production` — code is copied into the image, no volume mount required:
+Use `Dockerfile.production` — code is baked into the image, no volume mount needed:
 
 ```bash
 docker build -f Dockerfile.production -t imap-to-webhook:prod .
-docker run -d --name imap-to-webhook \
-  --env-file .env \
-  --restart unless-stopped \
-  imap-to-webhook:prod
+docker run -d --name imap-to-webhook --env-file .env --restart unless-stopped imap-to-webhook:prod
 ```
 
-Or switch the Dockerfile in `docker-compose.yml`:
-
-```yaml
-services:
-  imap_to_webhook:
-    build:
-      context: .
-      dockerfile: Dockerfile.production
-    # Remove the volumes section — production image has code baked in
-```
+Or set `dockerfile: Dockerfile.production` in your `docker-compose.yml` and remove the `volumes` section.
 
 ## License
 
