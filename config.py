@@ -77,7 +77,7 @@ def get_config(env):
 
     noop_flag = env.get("NOOP_FLAG", r"\Seen")
 
-    # Multi-account support: IMAP_URL_1, IMAP_URL_2, ... or single IMAP_URL
+    # Collect IMAP accounts: IMAP_URL_1, IMAP_URL_2, ...
     accounts = []
     i = 1
     while f"IMAP_URL_{i}" in env:
@@ -87,11 +87,11 @@ def get_config(env):
         i += 1
 
     if not accounts:
-        if "IMAP_URL" not in env:
-            raise EnvironmentError("IMAP_URL or IMAP_URL_1 is required")
-        accounts.append(
-            _parse_imap_config(env["IMAP_URL"], on_success, imap_timeout, noop_flag)
-        )
+        if "IMAP_URL" in env:
+            raise EnvironmentError(
+                "IMAP_URL is no longer supported. Rename it to IMAP_URL_1"
+            )
+        raise EnvironmentError("IMAP_URL_1 is required")
 
     return {
         "process_order": process_order,

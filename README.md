@@ -23,7 +23,7 @@ cd imap-to-webhook
 # Configure
 cp .env.example .env
 cp docker-compose.example.yml docker-compose.yml
-# Edit .env — fill in IMAP_URL and WEBHOOK_URL
+# Edit .env — fill in IMAP_URL_1 and WEBHOOK_URL
 # Edit docker-compose.yml — adjust network/volumes if needed
 
 # Run
@@ -52,7 +52,7 @@ The URL is parsed by Python's `urlparse`, which splits at the **last** `@` to se
 | `success` | `SUCCESS` | Destination for successfully delivered messages |
 | `refused` | `REFUSED` | Destination when webhook returns `{"status": "REFUSED"}` |
 
-To monitor multiple mailboxes from a single container, use numbered variables `IMAP_URL_1`, `IMAP_URL_2`, ... instead of `IMAP_URL`.
+To monitor multiple mailboxes from a single container, add `IMAP_URL_2`, `IMAP_URL_3`, ... alongside `IMAP_URL_1`.
 
 ### Environment variables
 
@@ -60,7 +60,7 @@ To monitor multiple mailboxes from a single container, use numbered variables `I
 
 | Variable | Description |
 |----------|-------------|
-| `IMAP_URL` | IMAP connection URL (see format above). Ignored when `IMAP_URL_1` exists |
+| `IMAP_URL_1` | IMAP connection URL (see format above) |
 | `WEBHOOK_URL` | HTTP(S) endpoint that receives parsed emails |
 
 **Processing:**
@@ -199,7 +199,7 @@ All IMAP folder operations have a **3-tier fallback**: target folder → ERROR f
 ## Testing
 
 ```bash
-# Recommended: build the testing stage (runs all 216 tests at build time)
+# Recommended: build the testing stage (runs all 215 tests at build time)
 docker build --target testing -t imap-to-webhook-test .
 
 # Or use the Makefile shortcut
@@ -227,7 +227,7 @@ docker exec imap-to-webhook python test.py
 │   ├── text.py                #   Plain text quote extraction
 │   └── utils.py               #   Preprocessing (link normalization, splitter detection)
 │
-├── test.py                    # 216 unit tests (10 test classes)
+├── test.py                    # 215 unit tests (10 test classes)
 ├── mails/                     # Test .eml and HTML samples
 ├── Dockerfile                 # Dev image (CMD: sleep infinity for debugging)
 ├── Dockerfile.production      # Prod image (CMD: python daemon.py)

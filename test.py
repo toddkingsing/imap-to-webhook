@@ -2142,7 +2142,7 @@ class TestProcessOrder(unittest.TestCase):
 
     def test_default_fifo(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
         }
         from config import get_config
@@ -2152,7 +2152,7 @@ class TestProcessOrder(unittest.TestCase):
 
     def test_lifo(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "PROCESS_ORDER": "lifo",
         }
@@ -2163,7 +2163,7 @@ class TestProcessOrder(unittest.TestCase):
 
     def test_invalid_value_raises(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "PROCESS_ORDER": "random",
         }
@@ -2186,7 +2186,7 @@ class TestWebhookSecret(unittest.TestCase):
 
     def test_secret_in_config(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "WEBHOOK_SECRET": "my-secret-123",
         }
@@ -2197,7 +2197,7 @@ class TestWebhookSecret(unittest.TestCase):
 
     def test_empty_secret_default(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
         }
         from config import get_config
@@ -2211,7 +2211,7 @@ class TestWebhookSecret(unittest.TestCase):
         from config import get_config
 
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "WEBHOOK_SECRET": "my-secret-123",
         }
@@ -2549,7 +2549,7 @@ class TestRetry(unittest.TestCase):
 
     def test_no_retry_by_default(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
         }
         from config import get_config
@@ -2564,7 +2564,7 @@ class TestBatchProcessing(unittest.TestCase):
 
     def test_config_default_batch_size(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
         }
         from config import get_config
@@ -2575,7 +2575,7 @@ class TestBatchProcessing(unittest.TestCase):
 
     def test_config_batch_size_zero_raises(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "BATCH_SIZE": "0",
         }
@@ -2586,7 +2586,7 @@ class TestBatchProcessing(unittest.TestCase):
 
     def test_config_negative_delivery_interval_raises(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "DELIVERY_INTERVAL": "-1",
         }
@@ -2630,7 +2630,7 @@ class TestBatchProcessing(unittest.TestCase):
 
     def test_delivery_interval_config(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "BATCH_SIZE": "5",
             "DELIVERY_INTERVAL": "10.5",
@@ -2645,9 +2645,9 @@ class TestBatchProcessing(unittest.TestCase):
 class TestMultiAccount(unittest.TestCase):
     """F6: Multi-account support tests."""
 
-    def test_single_imap_url(self):
+    def test_single_account(self):
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
         }
         from config import get_config
@@ -2677,8 +2677,9 @@ class TestMultiAccount(unittest.TestCase):
         }
         from config import get_config
 
-        with self.assertRaises(EnvironmentError):
+        with self.assertRaises(EnvironmentError) as ctx:
             get_config(env)
+        self.assertIn("IMAP_URL_1 is required", str(ctx.exception))
 
     def test_imap_backward_compat(self):
         """config['imap'] points to first account."""
@@ -2692,30 +2693,18 @@ class TestMultiAccount(unittest.TestCase):
         cfg = get_config(env)
         self.assertEqual(cfg["imap"]["username"], "first@a.com")
 
-    def test_imap_url_takes_precedence_when_no_numbered(self):
-        """When only IMAP_URL is set (no IMAP_URL_1), it's used."""
+    def test_legacy_imap_url_gives_helpful_error(self):
+        """Using bare IMAP_URL raises with migration hint."""
         env = {
-            "IMAP_URL": "imap+ssl://solo%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL": "imap+ssl://old%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
         }
         from config import get_config
 
-        cfg = get_config(env)
-        self.assertEqual(len(cfg["imap_accounts"]), 1)
-        self.assertEqual(cfg["imap_accounts"][0]["username"], "solo@test.com")
-
-    def test_numbered_urls_skip_imap_url(self):
-        """When IMAP_URL_1 exists, IMAP_URL is ignored."""
-        env = {
-            "IMAP_URL": "imap+ssl://ignored%40x.com:pass@imap.x.com:993/",
-            "IMAP_URL_1": "imap+ssl://used%40a.com:pass@imap.a.com:993/",
-            "WEBHOOK_URL": "https://example.com/hook",
-        }
-        from config import get_config
-
-        cfg = get_config(env)
-        self.assertEqual(len(cfg["imap_accounts"]), 1)
-        self.assertEqual(cfg["imap_accounts"][0]["username"], "used@a.com")
+        with self.assertRaises(EnvironmentError) as ctx:
+            get_config(env)
+        self.assertIn("Rename", str(ctx.exception))
+        self.assertIn("IMAP_URL_1", str(ctx.exception))
 
     def test_password_masked_all_accounts(self):
         import copy
@@ -2783,7 +2772,7 @@ class TestNoopMode(unittest.TestCase):
         from config import get_config
 
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "ON_SUCCESS": "noop",
         }
@@ -2794,7 +2783,7 @@ class TestNoopMode(unittest.TestCase):
         from config import get_config
 
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "ON_SUCCESS": "xxx",
         }
@@ -2959,7 +2948,7 @@ class TestNoopMode(unittest.TestCase):
         from config import get_config
 
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "ON_SUCCESS": "noop",
         }
@@ -2970,7 +2959,7 @@ class TestNoopMode(unittest.TestCase):
         from config import get_config
 
         env = {
-            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
             "WEBHOOK_URL": "https://example.com/hook",
             "ON_SUCCESS": "noop",
             "NOOP_FLAG": "$WebhookProcessed",

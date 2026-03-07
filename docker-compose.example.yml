@@ -6,7 +6,7 @@ services:
       context: .
     container_name: imap-to-webhook
     env_file:
-      - .env.example
+      - .env  # cp .env.example .env
     volumes:
       - .:/usr/src/app
     restart: unless-stopped
