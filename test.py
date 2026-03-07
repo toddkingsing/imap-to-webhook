@@ -1720,6 +1720,62 @@ that this line is intact."""
         self.assertIn("document you requested", quote)
 
     # ---------------------------------------------------------------
+    # border-left style detection (pt/em units, CSS shorthand ordering)
+    # ---------------------------------------------------------------
+    def test_border_left_pt_unit(self):
+        """border-left with pt unit (NetEase/Outlook style) is detected."""
+        html_body = """<div>
+<p>New reply content.</p>
+<div style="border:none;border-left:solid #CCCCCC 1.0pt;padding:0in 0in 0in 6.0pt">
+<p>This is the quoted old email content.</p>
+</div>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("New reply", clean)
+        self.assertNotIn("quoted old email", clean)
+
+    def test_border_left_width_last_in_shorthand(self):
+        """border-left shorthand with width at end (solid #ccc 2px) is detected."""
+        html_body = """<div>
+<p>My response.</p>
+<div style="border-left:solid#cccccc2px;margin-left:5px">
+<p>Previous message text.</p>
+</div>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("My response", clean)
+        self.assertNotIn("Previous message", clean)
+
+    # ---------------------------------------------------------------
+    # Zoho Mail / NetEase editor quote detection
+    # ---------------------------------------------------------------
+    def test_zoho_mail_quote(self):
+        """Zoho Mail quote block with class='zmail_extra' is separated."""
+        html_body = """<div>
+<p>Got it, thanks.</p>
+<div class="zmail_extra">
+<p>On Mar 7, Bob wrote:</p>
+<p>Please review the attached proposal.</p>
+</div>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("Got it", clean)
+        self.assertNotIn("attached proposal", clean)
+
+    def test_netease_editor_reply_id(self):
+        """NetEase editor blockquote with id='isReplyContent' is separated."""
+        html_body = """<div>
+<p>OK, confirmed.</p>
+<blockquote id="isReplyContent">
+<p>Please confirm receipt of the order.</p>
+</blockquote>
+</div>"""
+        clean, quote = html.strip_email_quote(html_body)
+        self.assertIn("OK, confirmed", clean)
+        self.assertNotIn("confirm receipt", clean)
+        self.assertIn("confirm receipt", quote)
+
+    # ---------------------------------------------------------------
     # Japanese quote detection
     # ---------------------------------------------------------------
     def test_japanese_original_message_plain_text(self):

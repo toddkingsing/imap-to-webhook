@@ -61,6 +61,7 @@ def looks_like_quote(tag: Tag) -> bool:  # now top-level
         "divrplyfwdmsg",
         "outlookquotedcontent",
         "olk_src_body_section",
+        "isreplycontent",  # NetEase editor reply container
     }:
         return True
     tcls = " ".join(tag.get("class", [])).lower()
@@ -72,11 +73,12 @@ def looks_like_quote(tag: Tag) -> bool:  # now top-level
             "js-email-quote",
             "outlookmessageheader",
             "protonmail_quote",
+            "zmail_extra",  # Zoho Mail
         )
     ):
         return True
     style = (tag.get("style") or "").replace(" ", "").lower()
-    return bool(re.search(r"border-left[^:]*:\s*\d+px", style))
+    return bool(re.search(r"border-left[^;]*\d+\.?\d*(?:px|pt|em)", style))
 
 
 def _preprocess_outlook(soup: BeautifulSoup) -> None:
