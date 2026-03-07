@@ -2310,7 +2310,7 @@ class TestStats(unittest.TestCase):
         s.record_success(2.5)
         self.assertEqual(s.processed, 2)
         self.assertEqual(s.success, 2)
-        self.assertEqual(s._durations, [1.5, 2.5])
+        self.assertEqual(list(s._durations), [1.5, 2.5])
 
     def test_record_failure(self):
         from stats import Stats
@@ -3494,6 +3494,310 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         self.assertEqual(result, RESULT_FAILED)
         # Last resort: mark_delete for delete mode
         client.mark_delete.assert_called_once_with("1")
+
+
+class TestSignature(unittest.TestCase):
+    """Tests for extract_raw_content.signature.extract_signature()"""
+
+    def setUp(self):
+        from extract_raw_content.signature import extract_signature
+        self.extract = extract_signature
+
+    # -- empty / trivial input --
+
+    def test_empty_string(self):
+        self.assertEqual(self.extract(""), "")
+
+    def test_none(self):
+        self.assertEqual(self.extract(None), "")
+
+    def test_single_line(self):
+        self.assertEqual(self.extract("Hello world"), "")
+
+    def test_no_signature(self):
+        body = "Hello,\n\nPlease find the report attached.\n\nLet me know if you have questions."
+        self.assertEqual(self.extract(body), "")
+
+    # -- dash delimiter --
+
+    def test_dash_delimiter_standard(self):
+        body = "Hello,\n\nPlease review.\n\n--\nJohn Smith\nCEO, Acme Corp"
+        sig = self.extract(body)
+        self.assertIn("--", sig)
+        self.assertIn("John Smith", sig)
+        self.assertIn("CEO, Acme Corp", sig)
+
+    def test_dash_delimiter_with_space(self):
+        body = "Hello,\n\nPlease review.\n\n-- \nJohn Smith"
+        sig = self.extract(body)
+        self.assertIn("John Smith", sig)
+
+    def test_triple_dash(self):
+        body = "Hello,\n\nPlease review.\n\n---\nJohn Smith\n+1-234-567-8900"
+        sig = self.extract(body)
+        self.assertIn("John Smith", sig)
+
+    # -- English closing phrases --
+
+    def test_thanks(self):
+        body = "Hello,\n\nPlease review the doc.\n\nThanks,\nJohn Smith"
+        sig = self.extract(body)
+        self.assertIn("Thanks", sig)
+        self.assertIn("John Smith", sig)
+
+    def test_thanks_exclamation(self):
+        body = "Hello,\n\nHere it is.\n\nThanks!\nJohn"
+        sig = self.extract(body)
+        self.assertIn("Thanks!", sig)
+
+    def test_best_regards(self):
+        body = "Hi,\n\nDone.\n\nBest regards,\nJane Doe\njane@example.com"
+        sig = self.extract(body)
+        self.assertIn("Best regards", sig)
+        self.assertIn("Jane Doe", sig)
+
+    def test_kind_regards(self):
+        body = "Hi,\n\nAttached.\n\nKind regards,\nBob"
+        sig = self.extract(body)
+        self.assertIn("Kind regards", sig)
+
+    def test_cheers(self):
+        body = "Hi,\n\nDone.\n\nCheers,\nAlice"
+        sig = self.extract(body)
+        self.assertIn("Cheers", sig)
+
+    def test_sincerely(self):
+        body = "Dear Sir,\n\nPlease find enclosed.\n\nSincerely,\nJohn"
+        sig = self.extract(body)
+        self.assertIn("Sincerely", sig)
+
+    # -- Chinese --
+
+    def test_chinese_xie_xie(self):
+        body = "你好，\n\n请查收附件。\n\n谢谢！\n张三\n上海晶上自动化设备有限公司"
+        sig = self.extract(body)
+        self.assertIn("谢谢", sig)
+        self.assertIn("张三", sig)
+
+    def test_chinese_ci_zhi(self):
+        body = "你好，\n\n报告已完成。\n\n此致敬礼\n李四"
+        sig = self.extract(body)
+        self.assertIn("此致敬礼", sig)
+
+    def test_chinese_shun_song(self):
+        body = "王经理，\n\n合同已发送。\n\n顺颂商祺\n赵六\n销售部"
+        sig = self.extract(body)
+        self.assertIn("顺颂商祺", sig)
+
+    def test_chinese_traditional(self):
+        body = "您好，\n\n請查收。\n\n謝謝\n王五"
+        sig = self.extract(body)
+        self.assertIn("謝謝", sig)
+
+    # -- Japanese --
+
+    def test_japanese_yoroshiku(self):
+        body = "お疲れ様です。\n\n資料を添付します。\n\nよろしくお願いします。\n田中太郎"
+        sig = self.extract(body)
+        self.assertIn("よろしくお願いします", sig)
+        self.assertIn("田中太郎", sig)
+
+    def test_japanese_keigu(self):
+        body = "拝啓\n\n報告書を送付いたします。\n\n敬具\n鈴木一郎"
+        sig = self.extract(body)
+        self.assertIn("敬具", sig)
+
+    # -- Korean --
+
+    def test_korean_gamsahamnida(self):
+        body = "안녕하세요,\n\n첨부파일을 확인해주세요.\n\n감사합니다.\n김철수"
+        sig = self.extract(body)
+        self.assertIn("감사합니다", sig)
+        self.assertIn("김철수", sig)
+
+    # -- French --
+
+    def test_french_cordialement(self):
+        body = "Bonjour,\n\nVeuillez trouver ci-joint.\n\nCordialement,\nJean Dupont"
+        sig = self.extract(body)
+        self.assertIn("Cordialement", sig)
+        self.assertIn("Jean Dupont", sig)
+
+    def test_french_merci(self):
+        body = "Bonjour,\n\nFait.\n\nMerci,\nMarie"
+        sig = self.extract(body)
+        self.assertIn("Merci", sig)
+
+    # -- German --
+
+    def test_german_mfg(self):
+        body = "Hallo,\n\nAnbei der Bericht.\n\nMit freundlichen Grüßen,\nHans Müller"
+        sig = self.extract(body)
+        self.assertIn("Mit freundlichen Grüßen", sig)
+
+    def test_german_danke(self):
+        body = "Hallo,\n\nErledigt.\n\nDanke,\nPeter"
+        sig = self.extract(body)
+        self.assertIn("Danke", sig)
+
+    # -- Spanish --
+
+    def test_spanish_saludos(self):
+        body = "Hola,\n\nAdjunto el informe.\n\nSaludos,\nCarlos García"
+        sig = self.extract(body)
+        self.assertIn("Saludos", sig)
+
+    def test_spanish_atentamente(self):
+        body = "Estimado,\n\nLe envío.\n\nAtentamente,\nMaría López"
+        sig = self.extract(body)
+        self.assertIn("Atentamente", sig)
+
+    # -- Portuguese --
+
+    def test_portuguese_obrigado(self):
+        body = "Olá,\n\nSegue em anexo.\n\nObrigado,\nPedro Silva"
+        sig = self.extract(body)
+        self.assertIn("Obrigado", sig)
+
+    # -- Italian --
+
+    def test_italian_cordiali_saluti(self):
+        body = "Buongiorno,\n\nIn allegato.\n\nCordiali saluti,\nMarco Rossi"
+        sig = self.extract(body)
+        self.assertIn("Cordiali saluti", sig)
+
+    # -- Russian --
+
+    def test_russian_s_uvazheniem(self):
+        body = "Здравствуйте,\n\nОтчёт прилагается.\n\nС уважением,\nИван Петров"
+        sig = self.extract(body)
+        self.assertIn("С уважением", sig)
+
+    # -- Dutch --
+
+    def test_dutch_groeten(self):
+        body = "Hallo,\n\nBijgevoegd.\n\nMet vriendelijke groeten,\nJan de Vries"
+        sig = self.extract(body)
+        self.assertIn("Met vriendelijke groeten", sig)
+
+    # -- Polish --
+
+    def test_polish_pozdrawiam(self):
+        body = "Dzień dobry,\n\nW załączeniu.\n\nPozdrawiam,\nPiotr Nowak"
+        sig = self.extract(body)
+        self.assertIn("Pozdrawiam", sig)
+
+    # -- Norwegian --
+
+    def test_norwegian_hilsen(self):
+        body = "Hei,\n\nVedlagt.\n\nMed vennlig hilsen,\nOle Hansen"
+        sig = self.extract(body)
+        self.assertIn("Med vennlig hilsen", sig)
+
+    # -- Swedish --
+
+    def test_swedish_halsningar(self):
+        body = "Hej,\n\nBifogat.\n\nMed vänliga hälsningar,\nErik Svensson"
+        sig = self.extract(body)
+        self.assertIn("Med vänliga hälsningar", sig)
+
+    # -- Vietnamese --
+
+    def test_vietnamese_tran_trong(self):
+        body = "Xin chào,\n\nĐính kèm báo cáo.\n\nTrân trọng,\nNguyễn Văn A"
+        sig = self.extract(body)
+        self.assertIn("Trân trọng", sig)
+
+    # -- Phone / device signatures --
+
+    def test_sent_from_iphone(self):
+        body = "Quick reply\n\nSent from my iPhone"
+        sig = self.extract(body)
+        self.assertIn("Sent from my iPhone", sig)
+
+    def test_sent_from_samsung(self):
+        body = "OK, got it.\n\nSent from my Samsung Galaxy"
+        sig = self.extract(body)
+        self.assertIn("Sent from my Samsung Galaxy", sig)
+
+    def test_sent_from_outlook(self):
+        body = "Please see attached.\n\nSent from Outlook for Android"
+        sig = self.extract(body)
+        self.assertIn("Sent from Outlook for Android", sig)
+
+    def test_chinese_phone_sig(self):
+        body = "好的，收到。\n\n发自我的 iPhone"
+        sig = self.extract(body)
+        self.assertIn("发自我的", sig)
+
+    def test_japanese_phone_sig(self):
+        body = "了解しました。\n\niPhoneから送信"
+        sig = self.extract(body)
+        self.assertIn("iPhoneから送信", sig)
+
+    def test_french_phone_sig(self):
+        body = "D'accord.\n\nEnvoyé depuis mon iPhone"
+        sig = self.extract(body)
+        self.assertIn("Envoyé depuis mon iPhone", sig)
+
+    def test_german_phone_sig(self):
+        body = "OK.\n\nGesendet von meinem iPhone"
+        sig = self.extract(body)
+        self.assertIn("Gesendet von meinem iPhone", sig)
+
+    def test_spanish_phone_sig(self):
+        body = "Recibido.\n\nEnviado desde mi iPhone"
+        sig = self.extract(body)
+        self.assertIn("Enviado desde mi iPhone", sig)
+
+    # -- Priority: dash > closing > phone --
+
+    def test_dash_captures_closing_and_phone(self):
+        body = "Hello,\n\nDone.\n\n--\nThanks,\nJohn\nSent from my iPhone"
+        sig = self.extract(body)
+        self.assertIn("--", sig)
+        self.assertIn("Thanks", sig)
+        self.assertIn("John", sig)
+        self.assertIn("Sent from my iPhone", sig)
+
+    def test_closing_captures_phone(self):
+        body = "Hello,\n\nDone.\n\nThanks,\nJohn\nSent from my iPhone"
+        sig = self.extract(body)
+        self.assertIn("Thanks", sig)
+        self.assertIn("Sent from my iPhone", sig)
+
+    # -- content is NOT modified --
+
+    def test_content_unchanged(self):
+        body = "Hello,\n\nPlease review.\n\nThanks,\nJohn Smith"
+        original = body  # strings are immutable, just verify return is separate
+        sig = self.extract(body)
+        self.assertEqual(body, original)
+        self.assertIn("Thanks", sig)
+
+    # -- Integration: manifest contains signature field --
+
+    def test_manifest_has_signature_field(self):
+        mail = get_email_as_bytes("disposition-notification.eml")
+        body = serialize_mail(mail)
+        body_map = {k: v for k, v in body}
+        manifest = json.loads(body_map["manifest"][1].read().decode("utf-8"))
+        self.assertIn("signature", manifest["text"])
+        self.assertIsInstance(manifest["text"]["signature"], str)
+
+    def test_signature_not_removed_from_content(self):
+        """Signature text must remain inside content — extraction is non-destructive."""
+        mail = get_email_as_bytes("disposition-notification.eml")
+        body = serialize_mail(mail)
+        body_map = {k: v for k, v in body}
+        manifest = json.loads(body_map["manifest"][1].read().decode("utf-8"))
+        sig = manifest["text"]["signature"]
+        content = manifest["text"]["content"]
+        if sig:
+            # Every non-empty signature line should appear in content
+            for line in sig.splitlines():
+                if line.strip():
+                    self.assertIn(line.strip(), content)
 
 
 if __name__ == "__main__":

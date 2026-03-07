@@ -187,8 +187,21 @@ def _parse_received(line: str) -> dict:
 
 
 def _flatten_headers(raw_bytes: bytes) -> dict:
-    """Parse raw email bytes and return all headers as {lowercase_key: value_str}."""
-    msg = BytesParser(policy=policy.default).parsebytes(raw_bytes)
+    """Parse raw email headers and return as {lowercase_key: value_str}.
+
+    Only the header block (up to the first blank line) is parsed to avoid
+    allocating the full MIME body tree — critical for large emails (up to 25 MB).
+    """
+    # RFC 5322: headers end at first blank line
+    sep = raw_bytes.find(b"\r\n\r\n")
+    if sep == -1:
+        sep = raw_bytes.find(b"\n\n")
+    if sep == -1:
+        # Malformed: no blank line separator; cap at 32 KB to avoid
+        # parsing megabytes of body as headers.
+        sep = min(len(raw_bytes), 32768)
+    header_bytes = raw_bytes[:sep]
+    msg = BytesParser(policy=policy.default).parsebytes(header_bytes)
     flat = {}
     seen = set()
     for key in msg.keys():

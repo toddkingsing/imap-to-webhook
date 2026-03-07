@@ -27,11 +27,18 @@ def _replace_link_brackets(msg_body):
     return msg_body
 
 
+_MAX_BODY_FOR_SPLITTER_RE = 50000
+
+
 def _wrap_splitter_with_newline(msg_body, delimiter, content_type="text/plain"):
     """
     Splits line in two if splitter pattern preceded by some text on the same
     line (done only for 'On <date> <person> wrote:' pattern.
     """
+    # Guard: RE_ON_DATE_SMB_WROTE contains .* chains that can cause
+    # quadratic backtracking on very long inputs.  Skip for oversized bodies.
+    if content_type != "text/plain" or len(msg_body) > _MAX_BODY_FOR_SPLITTER_RE:
+        return msg_body
 
     def splitter_wrapper(splitter):
         """Wraps splitter with new line"""
@@ -40,8 +47,7 @@ def _wrap_splitter_with_newline(msg_body, delimiter, content_type="text/plain"):
         else:
             return splitter.group()
 
-    if content_type == "text/plain":
-        msg_body = re.sub(const.RE_ON_DATE_SMB_WROTE, splitter_wrapper, msg_body)
+    msg_body = re.sub(const.RE_ON_DATE_SMB_WROTE, splitter_wrapper, msg_body)
     return msg_body
 
 

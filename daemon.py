@@ -31,10 +31,11 @@ def _handle_signal(signum, frame):
 
 def _interruptible_sleep(seconds):
     """Sleep in 1-second increments so _shutdown signal is respected promptly."""
-    for _ in range(int(seconds)):
-        if _shutdown:
-            return
-        time.sleep(1)
+    remaining = float(seconds)
+    while remaining > 0 and not _shutdown:
+        chunk = min(1.0, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
 
 
 def _touch_heartbeat(path=None):
@@ -67,14 +68,14 @@ def main():
     session = requests.Session()
     if config.get("webhook_secret"):
         session.headers["X-Webhook-Secret"] = config["webhook_secret"]
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
     logger.info("Starting daemon version %s", __version__)
     logger.info("Configuration: %s", config_printout)
     sentry_sdk.init(dsn=config["sentry_dsn"], traces_sample_rate=1.0)
 
     stats = Stats(config.get("stats_log_interval", 300))
-
-    signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT, _handle_signal)
 
     try:
         loop(config, session, stats)
@@ -96,6 +97,7 @@ def loop(config, session, stats=None):
 
     while not _shutdown:
         any_message_global = False
+        iteration_had_error = False
 
         for acct_idx, acct in enumerate(accounts):
             if _shutdown:
@@ -156,9 +158,11 @@ def loop(config, session, stats=None):
 
                     # Phase 2: Throttled delivery
                     phase2_failures = 0
-                    for i, (msg_id, raw_mail) in enumerate(downloaded):
+                    for i in range(len(downloaded)):
                         if _shutdown:
                             break
+                        msg_id, raw_mail = downloaded[i]
+                        downloaded[i] = None  # release memory early
                         if i > 0 and delivery_interval > 0:
                             logger.debug(
                                 "[%s] Delivery interval: waiting %.1fs",
@@ -185,16 +189,12 @@ def loop(config, session, stats=None):
                             )
                             sentry_sdk.capture_exception(proc_err)
                     if downloaded and phase2_failures == len(downloaded):
-                        consecutive_errors += 1
-                    else:
-                        consecutive_errors = 0
-                else:
-                    consecutive_errors = 0
+                        iteration_had_error = True
             except Exception as e:
-                consecutive_errors += 1
+                iteration_had_error = True
                 sentry_sdk.capture_exception(e)
                 logger.error(
-                    "[%s] Error in loop iteration (attempt %d): %s",
+                    "[%s] Error in loop iteration (consecutive=%d): %s",
                     label,
                     consecutive_errors,
                     e,
@@ -212,6 +212,11 @@ def loop(config, session, stats=None):
                         logger.warning(
                             "[%s] connection_close() failed: %s", label, close_err
                         )
+
+        if iteration_had_error:
+            consecutive_errors += 1
+        else:
+            consecutive_errors = 0
 
         _touch_heartbeat()
         if stats:
@@ -349,8 +354,8 @@ def process_msg_from_raw(client, msg_id, raw_mail, config, session, stats=None):
             res = session.post(config["webhook"], files=body, timeout=30)
             logger.info("Received response: %s", res.text[:500])
 
-            # REFUSED: do not retry
-            if res.status_code >= 400:
+            # 4xx: check for REFUSED, otherwise permanent failure (no retry)
+            if 400 <= res.status_code < 500:
                 payload = _safe_json(res)
                 if isinstance(payload, dict) and payload.get("status") == "REFUSED":
                     logger.info(
@@ -375,6 +380,17 @@ def process_msg_from_raw(client, msg_id, raw_mail, config, session, stats=None):
                     if stats:
                         stats.record_refused()
                     return RESULT_REFUSED
+                # Other 4xx — permanent client error, do not retry
+                logger.error(
+                    "Permanent %d from webhook for msg %s, moving to ERROR",
+                    res.status_code,
+                    msg_id,
+                )
+                if not _safe_move(client, msg_id, config["imap"]["error"]):
+                    _last_resort_mark(client, msg_id, config)
+                if stats:
+                    stats.record_failure()
+                return RESULT_FAILED
 
             # 5xx with retries remaining: retry
             if res.status_code >= 500 and attempt < max_retries:

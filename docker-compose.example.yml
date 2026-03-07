@@ -7,10 +7,9 @@ services:
     container_name: imap-to-webhook
     env_file:
       - .env  # cp .env.example .env
-    volumes:
-      - .:/usr/src/app
+    # volumes:
+    #   - .:/usr/src/app  # Uncomment for development only
     restart: unless-stopped
-    command: python daemon.py
     healthcheck:
       test: ["CMD", "python", "healthcheck.py"]
       interval: 120s

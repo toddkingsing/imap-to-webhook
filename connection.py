@@ -58,7 +58,14 @@ class IMAPClient:
             )
         if not data or not data[0]:
             raise Exception("Empty fetch response for msg {}".format(msg_id))
-        return data[0][1]
+        raw = data[0]
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            raise Exception(
+                "Unexpected fetch response format for msg {}: {!r}".format(
+                    msg_id, type(raw).__name__
+                )
+            )
+        return raw[1]
 
     def connection_close(self):
         try:

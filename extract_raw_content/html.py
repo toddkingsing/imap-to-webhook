@@ -200,12 +200,29 @@ def _preprocess_outlook(soup: BeautifulSoup) -> None:
     # ..................................................................
     #  2b · Fallback for *old* Outlook – no grey line, but a header para
     # ..................................................................
+    # Short words that can appear in normal body text — require a second
+    # header keyword nearby to treat the paragraph as a quote boundary.
+    _AMBIGUOUS_STARTERS = {
+        "to:", "de:", "da:", "do:", "cc:", "od:", "an:", "от:",
+        "to：", "de：", "da：", "do：", "cc：", "od：", "an：", "от：",
+    }
+
     def is_header_para(tag: Tag) -> bool:
         if tag.name not in {"p", "div"}:
             return False
         text = tag.get_text(" ", strip=True).lower()
-        # must start with a header keyword to avoid false positives
-        return any(text.startswith(w) for w in HDR_WORDS)
+        starter = None
+        for w in HDR_WORDS:
+            if text.startswith(w):
+                starter = w
+                break
+        if starter is None:
+            return False
+        # Unambiguous starters (e.g. "from:", "subject:") are safe alone.
+        if starter not in _AMBIGUOUS_STARTERS:
+            return True
+        # Ambiguous starters need a second header keyword in the same block.
+        return sum(1 for w in HDR_WORDS if w in text) >= 2
 
     header = soup.find(is_header_para)
     if header is not None:
@@ -295,21 +312,33 @@ def _harvest_from_first_hr(soup: BeautifulSoup, bucket: list[str]) -> None:
         if not any(w in following_lower for w in _HR_VALIDATION_WORDS):
             return  # decorative <hr>, leave it alone
 
-    # include the <hr> itself and every successor in document order
-    nodes = [hr] + list(hr.next_elements)
-    covered = set()
-    for node in nodes:
-        if not isinstance(node, (Tag, NavigableString)):
-            continue
-        if id(node) in covered:
-            continue
-        _safe_append(
-            bucket, _outer_html(node) if isinstance(node, Tag) else str(node)
-        )
-        # Mark all descendants as covered to avoid duplicate extraction
+    # Collect the <hr> and everything after it in the document.
+    # We walk the ancestor chain, collecting all following siblings at each
+    # level.  This handles nested structures (e.g., Outlook 2003 where the
+    # <hr> is deep inside wrapper divs) while avoiding the id()-aliasing
+    # problem of the old next_elements approach.
+    to_remove = []
+
+    # Start at the <hr> itself: collect it and its following siblings.
+    node = hr
+    while node is not None:
+        to_remove.append(node)
+        node = node.next_sibling
+
+    # Walk up ancestors and collect their following siblings too.
+    ancestor = hr.parent
+    while ancestor and ancestor.name not in (None, "[document]", "html", "body"):
+        sibling = ancestor.next_sibling
+        while sibling is not None:
+            to_remove.append(sibling)
+            sibling = sibling.next_sibling
+        ancestor = ancestor.parent
+
+    for node in to_remove:
         if isinstance(node, Tag):
-            for desc in node.descendants:
-                covered.add(id(desc))
+            _safe_append(bucket, _outer_html(node))
+        elif isinstance(node, NavigableString) and str(node).strip():
+            _safe_append(bucket, str(node))
         node.extract()
 
 

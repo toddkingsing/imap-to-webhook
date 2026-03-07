@@ -19,6 +19,7 @@ from email_validator import validate_email
 from html2text import html2text
 
 from extract_raw_content.html import strip_email_quote
+from extract_raw_content.signature import extract_signature
 from extract_raw_content.text import (
     extract_quoted_from_plain,
     extract_non_quoted_from_plain,
@@ -151,6 +152,7 @@ def get_text(mail):
         "content": plain_content,
         "html_quote": html_quote,
         "quote": plain_quote,
+        "signature": extract_signature(plain_content),
     }
 
 
@@ -194,17 +196,20 @@ def get_to_plus(mail):
 def get_attachments(mail):
     attachments = []
     for attachment in mail.attachments:
-        if attachment["content_transfer_encoding"] not in decoder_map:
-            msg = "Invalid Content-Transfer Encoding ({}) in msg {}.".format(
-                attachment["content_transfer_encoding"], mail.message_id
-            )
-            raise Exception(msg)
-        decoder = decoder_map[attachment["content_transfer_encoding"]]
-
         filename = attachment["filename"] or f"attachment_{uuid.uuid4().hex[:8]}"
-        filename = os.path.basename(filename)
+        filename = os.path.basename(filename.replace("\\", "/"))
         if not filename or len(filename) > 255:
             filename = f"attachment_{uuid.uuid4().hex[:8]}"
+
+        decoder = decoder_map.get(attachment["content_transfer_encoding"])
+        if decoder is None:
+            logging.getLogger("imap-to-webhook").warning(
+                "Unsupported CTE '%s' for attachment '%s' in %s, skipping",
+                attachment["content_transfer_encoding"],
+                filename,
+                mail.message_id,
+            )
+            continue
 
         try:
             content = decoder(attachment["payload"])
@@ -278,7 +283,11 @@ def get_manifest(mail, compress_eml, raw_bytes=None):
             "references": (
                 mail.references.split()
                 if isinstance(mail.references, str)
-                else list(mail.references)
+                else (
+                    list(mail.references)
+                    if hasattr(mail.references, "__iter__")
+                    else [str(mail.references)]
+                )
             )
             if mail.references
             else [],
@@ -354,12 +363,19 @@ def _coerce_header_objects_to_str(msg):
     for part in msg.walk():
         # Only headers that mailparser touches early are strictly necessary,
         # but doing all headers is safe and keeps behavior consistent.
+        seen = set()
         for name in list(part.keys()):
-            val = part.get(name)
-            if isinstance(val, EmailHeader):
-                # Replace Header object with its string representation
-                del part[name]
-                part[name] = str(val)
+            lname = name.lower()
+            if lname in seen:
+                continue
+            seen.add(lname)
+            vals = part.get_all(name, [])
+            if any(isinstance(v, EmailHeader) for v in vals):
+                # Remove all occurrences, then re-add each as str
+                while name in part:
+                    del part[name]
+                for v in vals:
+                    part[name] = str(v)
     return msg
 
 

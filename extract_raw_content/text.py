@@ -57,7 +57,7 @@ def mark_message_lines(lines):
     return "".join(markers)
 
 
-def process_marked_lines(lines, markers, return_flags=[False, -1, -1]):
+def process_marked_lines(lines, markers, return_flags=None):
     """Run regexes against message's marked lines to strip quotations.
 
     Return only last message lines.
@@ -68,6 +68,8 @@ def process_marked_lines(lines, markers, return_flags=[False, -1, -1]):
     return_flags = [were_lines_deleted, first_deleted_line,
                     last_deleted_line]
     """
+    if return_flags is None:
+        return_flags = [False, -1, -1]
     markers = "".join(markers)
     # if there are no splitter there should be no markers
     if "s" not in markers and not re.search("(me*){3}", markers):

@@ -16,8 +16,10 @@ COPY . .
 FROM build AS testing
 RUN python test.py
 
-# Development image (sleep infinity for debugging)
+# Production image
 FROM build
+RUN adduser --disabled-password --gecos "" appuser
+USER appuser
 HEALTHCHECK --interval=120s --timeout=5s --retries=3 --start-period=30s \
     CMD python healthcheck.py
-CMD ["sleep", "infinity"]
+CMD ["python", "daemon.py"]

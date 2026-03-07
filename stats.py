@@ -1,5 +1,6 @@
 import logging
 import time
+from collections import deque
 
 logger = logging.getLogger("imap-to-webhook")
 
@@ -13,7 +14,7 @@ class Stats:
         self.refused = 0
         self.retried = 0
         self.oversized = 0
-        self._durations = []
+        self._durations = deque(maxlen=10000)
         self._last_log_time = time.time()
 
     def record_success(self, duration):

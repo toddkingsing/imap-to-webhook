@@ -2,7 +2,7 @@
 
 Poll one or more IMAP mailboxes, parse each email into structured data, and deliver it to an HTTP endpoint as `multipart/form-data`.
 
-Originally forked from [watchdogpolska/imap-to-webhook](https://github.com/watchdogpolska/imap-to-webhook), now substantially rewritten with multi-account support, configurable noop tracking, batch processing, webhook retries, IP fingerprinting, multilingual quote detection (Chinese/Japanese/Korean/Spanish/Portuguese/Italian/...), a v3 manifest format, and Python 3.14 compatibility.
+Originally forked from [watchdogpolska/imap-to-webhook](https://github.com/watchdogpolska/imap-to-webhook), now substantially rewritten with multi-account support, configurable noop tracking, batch processing, webhook retries, IP fingerprinting, email signature detection, multilingual quote detection (Chinese/Japanese/Korean/Spanish/Portuguese/Italian/...), a v3 manifest format, and Python 3.14 compatibility.
 
 ```
 ┌───────────┐      ┌──────────────┐      ┌──────────────┐
@@ -117,7 +117,8 @@ Each email is sent as a `multipart/form-data` POST containing three types of par
     "content": "Plain text body (quotes stripped)",
     "html_content": "<p>HTML body (quotes stripped)</p>",
     "quote": "> Quoted plain text",
-    "html_quote": "<blockquote>Quoted HTML</blockquote>"
+    "html_quote": "<blockquote>Quoted HTML</blockquote>",
+    "signature": "Best regards,\nAlice\n+1 234 567 8900"
   },
   "files_count": 1,
   "eml": {
@@ -142,6 +143,7 @@ Each email is sent as a `multipart/form-data` POST containing three types of par
 | `headers.auto_reply_type` | `string \| null` | `"disposition-notification"`, `"vacation-reply"`, or `null` |
 | `text.content` / `html_content` | `string` | New content only — quoted replies are separated |
 | `text.quote` / `html_quote` | `string` | The quoted/reply portion |
+| `text.signature` | `string` | Detected email signature (empty if none found). Non-destructive: `content` still contains the full text including signature |
 | `fingerprint.ip` | `string` | Best-guess sender IP (empty if undetectable) |
 | `fingerprint.confidence` | `string` | `"high"`, `"medium"`, `"low"`, or `"none"` |
 | `fingerprint.is_user_ip` | `boolean` | Whether the IP likely belongs to the actual sender |
@@ -199,7 +201,7 @@ All IMAP folder operations have a **3-tier fallback**: target folder → ERROR f
 ## Testing
 
 ```bash
-# Recommended: build the testing stage (runs all 215 tests at build time)
+# Recommended: build the testing stage (runs all 262 tests at build time)
 docker build --target testing -t imap-to-webhook-test .
 
 # Or use the Makefile shortcut
@@ -225,12 +227,12 @@ docker exec imap-to-webhook python test.py
 │   ├── constants.py           #   Quote detection regex (EN/DE/FR/NL/ZH/JA/KO/ES/PT/IT/...)
 │   ├── html.py                #   HTML quote stripping (BeautifulSoup)
 │   ├── text.py                #   Plain text quote extraction
+│   ├── signature.py           #   Email signature detection (15 languages)
 │   └── utils.py               #   Preprocessing (link normalization, splitter detection)
 │
-├── test.py                    # 215 unit tests (10 test classes)
+├── test.py                    # 262 unit tests (11 test classes)
 ├── mails/                     # Test .eml and HTML samples
-├── Dockerfile                 # Dev image (CMD: sleep infinity for debugging)
-├── Dockerfile.production      # Prod image (CMD: python daemon.py)
+├── Dockerfile                 # Multi-stage: build → testing → production
 ├── docker-compose.example.yml # Compose template (cp to docker-compose.yml)
 ├── Makefile                   # Shortcuts: make start/stop/build/test
 └── .env.example               # Environment variable template (cp to .env)
@@ -238,15 +240,26 @@ docker exec imap-to-webhook python test.py
 
 ## Production deployment
 
-Use `Dockerfile.production` — code is baked into the image, no volume mount needed:
+The `Dockerfile` uses a multi-stage build. The default target is production-ready (non-root user, HEALTHCHECK, `CMD python daemon.py`). No separate production Dockerfile needed.
 
 ```bash
-docker build -f Dockerfile.production -t imap-to-webhook:prod .
+# Build (automatically skips the testing stage)
+docker build -t imap-to-webhook:prod .
+
+# Run standalone
 docker run -d --name imap-to-webhook --env-file .env --restart unless-stopped imap-to-webhook:prod
+
+# Or with docker compose (recommended)
+cp docker-compose.example.yml docker-compose.yml
+docker compose up -d --build
 ```
 
-Or set `dockerfile: Dockerfile.production` in your `docker-compose.yml` and remove the `volumes` section.
+To run tests during the build, target the testing stage:
+
+```bash
+docker build --target testing -t imap-to-webhook-test .
+```
 
 ## License
 
-[MIT](LICENSE) — Original copyright (c) 2018 Sieć Obywatelska - Watchdog Polska
+[MIT](LICENSE) — Original copyright (c) 2018 Siec Obywatelska - Watchdog Polska
