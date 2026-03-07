@@ -232,7 +232,7 @@ docker exec imap-to-webhook python test.py
 ├── Dockerfile                 # Dev image (CMD: sleep infinity for debugging)
 ├── Dockerfile.production      # Prod image (CMD: python daemon.py)
 ├── docker-compose.example.yml # Compose template (cp to docker-compose.yml)
-├── Makefile                   # Shortcuts: make start/stop/build/test/lint
+├── Makefile                   # Shortcuts: make start/stop/build/test
 └── .env.example               # Environment variable template (cp to .env)
 ```
 

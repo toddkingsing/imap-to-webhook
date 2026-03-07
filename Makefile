@@ -12,9 +12,3 @@ build:
 
 test:
 	docker build --target testing -t imap-to-webhook-test .
-
-lint:
-	pre-commit run
-
-lint-all:
-	pre-commit run --all-files

@@ -12,9 +12,6 @@ docs/
 .env.*
 .gitignore
 .dockerignore
-.pre-commit-config.yaml
 
 docker-compose*.yml
 Makefile
-pyproject.toml
-setup.cfg
