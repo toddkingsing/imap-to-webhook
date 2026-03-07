@@ -2739,7 +2739,7 @@ class TestMultiAccount(unittest.TestCase):
 
 
 class TestNoopMode(unittest.TestCase):
-    """ON_SUCCESS=noop: mark \Seen instead of move/delete."""
+    """ON_SUCCESS=noop: mark processed instead of move/delete."""
 
     def _make_config(self, **overrides):
         cfg = {
@@ -2755,6 +2755,7 @@ class TestNoopMode(unittest.TestCase):
                 "success": "SUCCESS",
                 "refused": "REFUSED",
                 "timeout": 60,
+                "noop_flag": r"\Seen",
             },
             "webhook": "https://example.com/hook",
             "compress_eml": False,
@@ -2821,6 +2822,7 @@ class TestNoopMode(unittest.TestCase):
             imap = IMAPClient.__new__(IMAPClient)
             imap.client = client
             imap.on_success = "noop"
+            imap.noop_flag = r"\Seen"
             imap.get_mail_ids()
             client.uid.assert_called_with("SEARCH", "UNSEEN")
 
@@ -2875,7 +2877,7 @@ class TestNoopMode(unittest.TestCase):
         config = self._make_config()
         config["imap"]["on_success"] = "noop"
         _handle_success(client, "1", config)
-        client.mark_seen.assert_called_once_with("1")
+        client.mark_processed.assert_called_once_with("1")
         client.move.assert_not_called()
         client.mark_delete.assert_not_called()
 
@@ -2889,7 +2891,7 @@ class TestNoopMode(unittest.TestCase):
         config["imap"]["on_success"] = "move"
         _handle_success(client, "1", config)
         client.move.assert_called_once_with("1", "SUCCESS")
-        client.mark_seen.assert_not_called()
+        client.mark_processed.assert_not_called()
 
     def test_handle_success_delete_regression(self):
         from unittest.mock import MagicMock
@@ -2901,7 +2903,7 @@ class TestNoopMode(unittest.TestCase):
         config["imap"]["on_success"] = "delete"
         _handle_success(client, "1", config)
         client.mark_delete.assert_called_once_with("1")
-        client.mark_seen.assert_not_called()
+        client.mark_processed.assert_not_called()
 
     # --- integration-level tests ---
 
@@ -2927,7 +2929,7 @@ class TestNoopMode(unittest.TestCase):
         client.move.assert_called_once_with("1", "ERROR")
 
     def test_noop_success_full_flow(self):
-        """noop + 2xx → mark_seen() called, not move/delete."""
+        """noop + 2xx → mark_processed() called, not move/delete."""
         from unittest.mock import MagicMock
 
         from daemon import RESULT_SUCCESS, process_msg_from_raw
@@ -2947,7 +2949,118 @@ class TestNoopMode(unittest.TestCase):
             client, "1", self._make_raw_mail(), config, session
         )
         self.assertEqual(result, RESULT_SUCCESS)
-        client.mark_seen.assert_called_once_with("1")
+        client.mark_processed.assert_called_once_with("1")
+        client.move.assert_not_called()
+        client.mark_delete.assert_not_called()
+
+    # --- NOOP_FLAG config tests ---
+
+    def test_config_noop_flag_default(self):
+        from config import get_config
+
+        env = {
+            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "WEBHOOK_URL": "https://example.com/hook",
+            "ON_SUCCESS": "noop",
+        }
+        cfg = get_config(env)
+        self.assertEqual(cfg["imap"]["noop_flag"], r"\Seen")
+
+    def test_config_noop_flag_custom(self):
+        from config import get_config
+
+        env = {
+            "IMAP_URL": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "WEBHOOK_URL": "https://example.com/hook",
+            "ON_SUCCESS": "noop",
+            "NOOP_FLAG": "$WebhookProcessed",
+        }
+        cfg = get_config(env)
+        self.assertEqual(cfg["imap"]["noop_flag"], "$WebhookProcessed")
+
+    def test_config_noop_flag_multi_account(self):
+        from config import get_config
+
+        env = {
+            "IMAP_URL_1": "imap+ssl://a%40test.com:pass@imap.test.com:993/",
+            "IMAP_URL_2": "imap+ssl://b%40test.com:pass@imap.test.com:993/",
+            "WEBHOOK_URL": "https://example.com/hook",
+            "NOOP_FLAG": "$WebhookProcessed",
+        }
+        cfg = get_config(env)
+        for acct in cfg["imap_accounts"]:
+            self.assertEqual(acct["noop_flag"], "$WebhookProcessed")
+
+    # --- mark_processed tests ---
+
+    def test_mark_processed_default_flag(self):
+        from unittest.mock import MagicMock
+
+        from connection import IMAPClient
+
+        client = MagicMock()
+        client.uid.return_value = ("OK", [None])
+
+        imap = IMAPClient.__new__(IMAPClient)
+        imap.client = client
+        imap.noop_flag = r"\Seen"
+        imap.mark_processed("42")
+        client.uid.assert_called_with("STORE", "42", "+FLAGS", r"(\Seen)")
+
+    def test_mark_processed_custom_flag(self):
+        from unittest.mock import MagicMock
+
+        from connection import IMAPClient
+
+        client = MagicMock()
+        client.uid.return_value = ("OK", [None])
+
+        imap = IMAPClient.__new__(IMAPClient)
+        imap.client = client
+        imap.noop_flag = "$WebhookProcessed"
+        imap.mark_processed("42")
+        client.uid.assert_called_with(
+            "STORE", "42", "+FLAGS", "($WebhookProcessed)"
+        )
+
+    def test_get_mail_ids_noop_custom_flag_searches_unkeyword(self):
+        from unittest.mock import MagicMock
+
+        from connection import IMAPClient
+
+        client = MagicMock()
+        client.uid.return_value = ("OK", [b"1 2 3"])
+
+        imap = IMAPClient.__new__(IMAPClient)
+        imap.client = client
+        imap.on_success = "noop"
+        imap.noop_flag = "$WebhookProcessed"
+        imap.get_mail_ids()
+        client.uid.assert_called_with("SEARCH", "UNKEYWORD", "$WebhookProcessed")
+
+    def test_noop_custom_flag_success_full_flow(self):
+        """noop + custom flag + 2xx → mark_processed() with custom flag."""
+        from unittest.mock import MagicMock
+
+        from daemon import RESULT_SUCCESS, process_msg_from_raw
+
+        client = MagicMock()
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 200
+        response.text = '{"status":"OK"}'
+        response.json.return_value = {"status": "OK"}
+        response.raise_for_status.return_value = None
+        session.post.return_value = response
+        config = self._make_config()
+        config["imap"]["on_success"] = "noop"
+        config["imap"]["noop_flag"] = "$WebhookProcessed"
+
+        result = process_msg_from_raw(
+            client, "1", self._make_raw_mail(), config, session
+        )
+        self.assertEqual(result, RESULT_SUCCESS)
+        client.mark_processed.assert_called_once_with("1")
         client.move.assert_not_called()
         client.mark_delete.assert_not_called()
 
@@ -2969,6 +3082,7 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
                 "success": "SUCCESS",
                 "refused": "REFUSED",
                 "timeout": 60,
+                "noop_flag": r"\Seen",
             },
             "webhook": "https://example.com/hook",
             "compress_eml": False,
@@ -2992,7 +3106,7 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
 
     # --- _last_resort_mark tests ---
 
-    def test_last_resort_noop_marks_seen(self):
+    def test_last_resort_noop_marks_processed(self):
         from unittest.mock import MagicMock
 
         from daemon import _last_resort_mark
@@ -3001,7 +3115,7 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         config = self._make_config()
         config["imap"]["on_success"] = "noop"
         _last_resort_mark(client, "1", config)
-        client.mark_seen.assert_called_once_with("1")
+        client.mark_processed.assert_called_once_with("1")
         client.mark_delete.assert_not_called()
 
     def test_last_resort_move_marks_deleted(self):
@@ -3014,7 +3128,7 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         config["imap"]["on_success"] = "move"
         _last_resort_mark(client, "1", config)
         client.mark_delete.assert_called_once_with("1")
-        client.mark_seen.assert_not_called()
+        client.mark_processed.assert_not_called()
 
     def test_last_resort_exception_not_raised(self):
         from unittest.mock import MagicMock, patch as mock_patch
@@ -3052,7 +3166,7 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         for mode, method in [
             ("move", "move"),
             ("delete", "mark_delete"),
-            ("noop", "mark_seen"),
+            ("noop", "mark_processed"),
         ]:
             client = MagicMock()
             getattr(client, method).side_effect = Exception("fail")
@@ -3179,7 +3293,7 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
             client, "1", oversized, config, MagicMock()
         )
         self.assertEqual(result, RESULT_OVERSIZED)
-        client.mark_seen.assert_called_once_with("1")
+        client.mark_processed.assert_called_once_with("1")
 
     def test_unserializable_error_missing_uses_last_resort(self):
         from unittest.mock import MagicMock, patch as mock_patch

@@ -30,10 +30,18 @@ class IMAPClient:
                 pass
             raise Exception("Unable to select folder", select_folder)
         self.on_success = config["imap"].get("on_success", "move")
+        self.noop_flag = config["imap"].get("noop_flag", r"\Seen")
 
     def get_mail_ids(self):
-        criterion = "UNSEEN" if self.on_success == "noop" else "ALL"
-        result_search, data = self.client.uid("SEARCH", criterion)
+        if self.on_success == "noop":
+            if self.noop_flag == r"\Seen":
+                result_search, data = self.client.uid("SEARCH", "UNSEEN")
+            else:
+                result_search, data = self.client.uid(
+                    "SEARCH", "UNKEYWORD", self.noop_flag
+                )
+        else:
+            result_search, data = self.client.uid("SEARCH", "ALL")
         if result_search != "OK":
             raise Exception(
                 f"Search failed: status={result_search}, data={data}"
@@ -90,6 +98,21 @@ class IMAPClient:
         result, _ = self.client.uid("STORE", msg_id, "+FLAGS", r"(\Seen)")
         if result != "OK":
             raise Exception("Failed to mark as seen msg {}".format(msg_id))
+
+    def mark_processed(self, msg_id):
+        """Mark message with the configured noop flag."""
+        logger.info(
+            "Marking message %s as processed (flag: %s)", msg_id, self.noop_flag
+        )
+        if self.noop_flag == r"\Seen":
+            flag_str = r"(\Seen)"
+        else:
+            flag_str = f"({self.noop_flag})"
+        result, _ = self.client.uid("STORE", msg_id, "+FLAGS", flag_str)
+        if result != "OK":
+            raise Exception(
+                f"Failed to mark msg {msg_id} as processed with flag {self.noop_flag}"
+            )
 
     def copy(self, folder, msg_id):
         logger.info("Going to copy %s to %s", msg_id, folder)

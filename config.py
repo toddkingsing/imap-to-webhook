@@ -9,7 +9,7 @@ def default_qs(qs, key, default):
     return parsed[key][0] if key in parsed else default
 
 
-def _parse_imap_config(url_str, on_success, imap_timeout):
+def _parse_imap_config(url_str, on_success, imap_timeout, noop_flag):
     """Parse a single IMAP URL into an account config dict."""
     imap_parse = urlparse(url_str)
     if imap_parse.scheme not in transports:
@@ -32,6 +32,7 @@ def _parse_imap_config(url_str, on_success, imap_timeout):
         "success": default_qs(imap_parse.query, "success", "SUCCESS"),
         "refused": default_qs(imap_parse.query, "refused", "REFUSED"),
         "timeout": imap_timeout,
+        "noop_flag": noop_flag,
     }
 
 
@@ -74,17 +75,23 @@ def get_config(env):
             f"PROCESS_ORDER must be 'fifo' or 'lifo', got: '{process_order}'"
         )
 
+    noop_flag = env.get("NOOP_FLAG", r"\Seen")
+
     # Multi-account support: IMAP_URL_1, IMAP_URL_2, ... or single IMAP_URL
     accounts = []
     i = 1
     while f"IMAP_URL_{i}" in env:
-        accounts.append(_parse_imap_config(env[f"IMAP_URL_{i}"], on_success, imap_timeout))
+        accounts.append(
+            _parse_imap_config(env[f"IMAP_URL_{i}"], on_success, imap_timeout, noop_flag)
+        )
         i += 1
 
     if not accounts:
         if "IMAP_URL" not in env:
             raise EnvironmentError("IMAP_URL or IMAP_URL_1 is required")
-        accounts.append(_parse_imap_config(env["IMAP_URL"], on_success, imap_timeout))
+        accounts.append(
+            _parse_imap_config(env["IMAP_URL"], on_success, imap_timeout, noop_flag)
+        )
 
     return {
         "process_order": process_order,

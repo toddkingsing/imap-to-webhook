@@ -260,10 +260,12 @@ def _last_resort_mark(client, msg_id, config):
     """Last resort: make msg invisible to future searches when all folders fail."""
     try:
         if config["imap"]["on_success"] == "noop":
-            client.mark_seen(msg_id)
+            client.mark_processed(msg_id)
+            noop_flag = config["imap"].get("noop_flag", r"\Seen")
             logger.warning(
-                "LAST RESORT: marked msg %s as \\Seen to prevent re-processing",
+                "LAST RESORT: marked msg %s with %s to prevent re-processing",
                 msg_id,
+                noop_flag,
             )
         else:
             client.mark_delete(msg_id)
@@ -287,7 +289,7 @@ def _handle_success(client, msg_id, config):
         elif config["imap"]["on_success"] == "move":
             client.move(msg_id, config["imap"]["success"])
         elif config["imap"]["on_success"] == "noop":
-            client.mark_seen(msg_id)
+            client.mark_processed(msg_id)
         else:
             logger.info("Unknown on_success mode for message id %s", msg_id)
         return True

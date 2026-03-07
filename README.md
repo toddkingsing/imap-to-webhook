@@ -68,6 +68,7 @@ To monitor multiple mailboxes from a single container, use numbered variables `I
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ON_SUCCESS` | `move` | After successful delivery: `move`, `delete`, or `noop` (mark as read, leave in inbox) |
+| `NOOP_FLAG` | `\Seen` | IMAP flag for noop mode tracking (`$WebhookProcessed` if other clients read mail) |
 | `COMPRESS_EML` | `false` | Gzip-compress the raw `.eml` attachment |
 | `DELAY` | `60` | Seconds to wait between poll cycles when the inbox is empty |
 | `IMAP_TIMEOUT` | `60` | IMAP connection and socket timeout (seconds) |
@@ -171,14 +172,14 @@ loop() — repeats until shutdown signal (SIGTERM / SIGINT):
 │
 ├── For each IMAP account:
 │   ├── Connect → LOGIN → SELECT inbox
-│   ├── UID SEARCH (ALL or UNSEEN in noop mode)
+│   ├── UID SEARCH (ALL, UNSEEN, or UNKEYWORD in noop mode)
 │   ├── Batch download up to BATCH_SIZE messages
 │   │
 │   ├── For each downloaded message:
 │   │   ├── Reject if > 25 MB → move to ERROR
 │   │   ├── serialize_mail() → multipart/form-data body
 │   │   ├── POST to WEBHOOK_URL
-│   │   │   ├── 2xx           → move to SUCCESS / delete / mark read
+│   │   │   ├── 2xx           → move to SUCCESS / delete / mark processed
 │   │   │   ├── 4xx + REFUSED → move to REFUSED
 │   │   │   ├── 5xx           → retry with exponential backoff
 │   │   │   └── final failure → move to ERROR
