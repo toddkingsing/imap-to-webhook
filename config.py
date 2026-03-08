@@ -4,6 +4,15 @@ from urllib.parse import parse_qs, unquote, urlparse
 transports = {"imap": [imaplib.IMAP4, 143], "imap+ssl": [imaplib.IMAP4_SSL, 993]}
 
 
+def _safe_int(env, key, default):
+    """Parse an env var as int with a descriptive error on failure."""
+    raw = env.get(key, default)
+    try:
+        return int(raw)
+    except ValueError:
+        raise EnvironmentError(f"{key} must be an integer, got: '{raw}'")
+
+
 def default_qs(qs, key, default):
     parsed = parse_qs(qs)
     return parsed[key][0] if key in parsed else default
@@ -51,19 +60,31 @@ def get_config(env):
             f"ON_SUCCESS must be 'move', 'delete', or 'noop', got: '{on_success}'"
         )
 
-    delay = int(env["DELAY"]) if "DELAY" in env else 60
+    try:
+        delay = int(env["DELAY"]) if "DELAY" in env else 60
+    except ValueError:
+        raise EnvironmentError(f"DELAY must be an integer, got: '{env['DELAY']}'")
     if delay < 1:
         raise EnvironmentError(f"DELAY must be >= 1, got: {delay}")
 
-    imap_timeout = int(env["IMAP_TIMEOUT"]) if "IMAP_TIMEOUT" in env else 60
+    try:
+        imap_timeout = int(env["IMAP_TIMEOUT"]) if "IMAP_TIMEOUT" in env else 60
+    except ValueError:
+        raise EnvironmentError(f"IMAP_TIMEOUT must be an integer, got: '{env['IMAP_TIMEOUT']}'")
     if imap_timeout < 1:
         raise EnvironmentError(f"IMAP_TIMEOUT must be >= 1, got: {imap_timeout}")
 
-    batch_size = int(env.get("BATCH_SIZE", "1"))
+    try:
+        batch_size = int(env.get("BATCH_SIZE", "1"))
+    except ValueError:
+        raise EnvironmentError(f"BATCH_SIZE must be an integer, got: '{env.get('BATCH_SIZE')}'")
     if batch_size < 1:
         raise EnvironmentError(f"BATCH_SIZE must be >= 1, got: {batch_size}")
 
-    delivery_interval = float(env.get("DELIVERY_INTERVAL", "0"))
+    try:
+        delivery_interval = float(env.get("DELIVERY_INTERVAL", "0"))
+    except ValueError:
+        raise EnvironmentError(f"DELIVERY_INTERVAL must be a number, got: '{env.get('DELIVERY_INTERVAL')}'")
     if delivery_interval < 0:
         raise EnvironmentError(
             f"DELIVERY_INTERVAL must be >= 0, got: {delivery_interval}"
@@ -93,6 +114,13 @@ def get_config(env):
             )
         raise EnvironmentError("IMAP_URL_1 is required")
 
+    try:
+        webhook_timeout = int(env.get("WEBHOOK_TIMEOUT", "90"))
+    except ValueError:
+        raise EnvironmentError(f"WEBHOOK_TIMEOUT must be an integer, got: '{env.get('WEBHOOK_TIMEOUT')}'")
+    if webhook_timeout < 1:
+        raise EnvironmentError(f"WEBHOOK_TIMEOUT must be >= 1, got: {webhook_timeout}")
+
     return {
         "process_order": process_order,
         "batch_size": batch_size,
@@ -104,7 +132,8 @@ def get_config(env):
         "delay": delay,
         "sentry_dsn": env.get("SENTRY_DSN", None),
         "webhook_secret": env.get("WEBHOOK_SECRET", ""),
-        "stats_log_interval": int(env.get("STATS_LOG_INTERVAL", "300")),
-        "webhook_max_retries": max(0, int(env.get("WEBHOOK_MAX_RETRIES", "0"))),
-        "webhook_retry_delay": max(1, int(env.get("WEBHOOK_RETRY_DELAY", "10"))),
+        "stats_log_interval": _safe_int(env, "STATS_LOG_INTERVAL", "300"),
+        "webhook_max_retries": max(0, _safe_int(env, "WEBHOOK_MAX_RETRIES", "0")),
+        "webhook_retry_delay": max(1, _safe_int(env, "WEBHOOK_RETRY_DELAY", "10")),
+        "webhook_timeout": webhook_timeout,
     }

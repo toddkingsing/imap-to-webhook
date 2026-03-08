@@ -73,7 +73,8 @@ def main():
 
     logger.info("Starting daemon version %s", __version__)
     logger.info("Configuration: %s", config_printout)
-    sentry_sdk.init(dsn=config["sentry_dsn"], traces_sample_rate=1.0)
+    if config["sentry_dsn"]:
+        sentry_sdk.init(dsn=config["sentry_dsn"], traces_sample_rate=1.0)
 
     stats = Stats(config.get("stats_log_interval", 300))
 
@@ -156,6 +157,15 @@ def loop(config, session, stats=None):
                                 fetch_err,
                             )
 
+                    # Guard: all Phase 1 fetches failed → count as error
+                    if not downloaded and batch:
+                        iteration_had_error = True
+                        logger.error(
+                            "[%s] All %d fetches failed, skipping delivery",
+                            label,
+                            len(batch),
+                        )
+
                     # Phase 2: Throttled delivery
                     phase2_failures = 0
                     for i in range(len(downloaded)):
@@ -218,7 +228,8 @@ def loop(config, session, stats=None):
         else:
             consecutive_errors = 0
 
-        _touch_heartbeat()
+        if not _shutdown:
+            _touch_heartbeat()
         if stats:
             stats.maybe_log_summary()
 
@@ -251,34 +262,68 @@ def _safe_json(res):
         return None
 
 
+def _try_reconnect(client):
+    """Attempt to reconnect the IMAP client. Returns True on success."""
+    try:
+        client.reconnect()
+        return True
+    except Exception as e:
+        logger.warning("IMAP reconnect failed: %s", e)
+        return False
+
+
 def _safe_move(client, msg_id, folder):
-    """Move msg to folder. Returns True on success, False on failure."""
+    """Move msg to folder. Returns True on success, False on failure.
+    On failure, attempts one IMAP reconnect and retries."""
     try:
         client.move(msg_id, folder)
         return True
     except Exception as move_err:
         logger.error("Failed to move msg %s to %s: %s", msg_id, folder, move_err)
+        if _try_reconnect(client):
+            try:
+                client.move(msg_id, folder)
+                logger.info("Reconnected and moved msg %s to %s", msg_id, folder)
+                return True
+            except Exception as retry_err:
+                logger.error(
+                    "Retry move after reconnect failed for msg %s: %s",
+                    msg_id,
+                    retry_err,
+                )
         return False
 
 
+def _do_last_resort(client, msg_id, config):
+    """Execute last-resort mark action. Raises on failure."""
+    if config["imap"]["on_success"] == "noop":
+        client.mark_processed(msg_id)
+        noop_flag = config["imap"].get("noop_flag", r"\Seen")
+        logger.warning(
+            "LAST RESORT: marked msg %s with %s to prevent re-processing",
+            msg_id,
+            noop_flag,
+        )
+    else:
+        client.mark_delete(msg_id)
+        logger.warning(
+            "LAST RESORT: marked msg %s as \\Deleted to prevent re-processing",
+            msg_id,
+        )
+
+
 def _last_resort_mark(client, msg_id, config):
-    """Last resort: make msg invisible to future searches when all folders fail."""
+    """Last resort: make msg invisible to future searches when all folders fail.
+    On failure, attempts one IMAP reconnect and retries."""
     try:
-        if config["imap"]["on_success"] == "noop":
-            client.mark_processed(msg_id)
-            noop_flag = config["imap"].get("noop_flag", r"\Seen")
-            logger.warning(
-                "LAST RESORT: marked msg %s with %s to prevent re-processing",
-                msg_id,
-                noop_flag,
-            )
-        else:
-            client.mark_delete(msg_id)
-            logger.warning(
-                "LAST RESORT: marked msg %s as \\Deleted to prevent re-processing",
-                msg_id,
-            )
+        _do_last_resort(client, msg_id, config)
     except Exception as e:
+        if _try_reconnect(client):
+            try:
+                _do_last_resort(client, msg_id, config)
+                return
+            except Exception:
+                pass
         logger.critical(
             "LAST RESORT FAILED for msg %s: %s. "
             "This message will be re-processed on next cycle.",
@@ -287,16 +332,22 @@ def _last_resort_mark(client, msg_id, config):
         )
 
 
+def _do_success_action(client, msg_id, config):
+    """Execute the on_success IMAP action. Raises on failure."""
+    if config["imap"]["on_success"] == "delete":
+        client.mark_delete(msg_id)
+    elif config["imap"]["on_success"] == "move":
+        client.move(msg_id, config["imap"]["success"])
+    elif config["imap"]["on_success"] == "noop":
+        client.mark_processed(msg_id)
+    else:
+        logger.info("Unknown on_success mode for message id %s", msg_id)
+
+
 def _handle_success(client, msg_id, config):
+    """Mark message as processed. On failure, attempts one IMAP reconnect."""
     try:
-        if config["imap"]["on_success"] == "delete":
-            client.mark_delete(msg_id)
-        elif config["imap"]["on_success"] == "move":
-            client.move(msg_id, config["imap"]["success"])
-        elif config["imap"]["on_success"] == "noop":
-            client.mark_processed(msg_id)
-        else:
-            logger.info("Unknown on_success mode for message id %s", msg_id)
+        _do_success_action(client, msg_id, config)
         return True
     except Exception as e:
         logger.error(
@@ -305,16 +356,18 @@ def _handle_success(client, msg_id, config):
             config["imap"]["on_success"],
             e,
         )
+        if _try_reconnect(client):
+            try:
+                _do_success_action(client, msg_id, config)
+                logger.info("Reconnected and marked msg %s as processed", msg_id)
+                return True
+            except Exception as retry_err:
+                logger.error(
+                    "Retry after reconnect failed for msg %s: %s",
+                    msg_id,
+                    retry_err,
+                )
         return False
-
-
-def process_msg(client, msg_id, config, session, stats=None):
-    logger.info("Fetch message ID %s", msg_id)
-    start = time.time()
-    raw_mail = client.fetch(msg_id)
-    elapsed = time.time() - start
-    logger.info("Message downloaded in %.2f seconds (%d bytes)", elapsed, len(raw_mail))
-    return process_msg_from_raw(client, msg_id, raw_mail, config, session, stats)
 
 
 def process_msg_from_raw(client, msg_id, raw_mail, config, session, stats=None):
@@ -336,6 +389,7 @@ def process_msg_from_raw(client, msg_id, raw_mail, config, session, stats=None):
 
     max_retries = config.get("webhook_max_retries", 0)
     retry_delay = config.get("webhook_retry_delay", 10)
+    webhook_timeout = config.get("webhook_timeout", 90)
 
     for attempt in range(max_retries + 1):
         # Re-serialize each attempt (BytesIO streams are consumed by requests)
@@ -351,7 +405,7 @@ def process_msg_from_raw(client, msg_id, raw_mail, config, session, stats=None):
             return RESULT_FAILED
 
         try:
-            res = session.post(config["webhook"], files=body, timeout=30)
+            res = session.post(config["webhook"], files=body, timeout=webhook_timeout)
             logger.info("Received response: %s", res.text[:500])
 
             # 4xx: check for REFUSED, otherwise permanent failure (no retry)
@@ -426,6 +480,9 @@ def process_msg_from_raw(client, msg_id, raw_mail, config, session, stats=None):
                 )
                 if not _safe_move(client, msg_id, config["imap"]["error"]):
                     _last_resort_mark(client, msg_id, config)
+                if stats:
+                    stats.record_failure()
+                return RESULT_FAILED
             if stats:
                 stats.record_success(time.time() - overall_start)
             return RESULT_SUCCESS

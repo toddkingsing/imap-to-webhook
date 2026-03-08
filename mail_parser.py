@@ -27,9 +27,9 @@ from extract_raw_content.text import (
 
 decoder_map = {
     "base64": base64.b64decode,
-    "": lambda payload: payload.encode("utf-8"),
-    "7bit": lambda payload: payload.encode("utf-8"),
-    "8bit": lambda payload: payload.encode("utf-8"),
+    "": lambda payload: payload if isinstance(payload, bytes) else payload.encode("utf-8"),
+    "7bit": lambda payload: payload if isinstance(payload, bytes) else payload.encode("utf-8"),
+    "8bit": lambda payload: payload if isinstance(payload, bytes) else payload.encode("utf-8"),
     "quoted-printable": quopri.decodestring,
 }
 
@@ -89,6 +89,9 @@ def _coerce_addresses(source):
                 if email:
                     out.append((name, email))
             return out
+        # list of plain strings (e.g. ["user@example.com", "Name <a@b>"])
+        if src_list and isinstance(src_list[0], str):
+            return getaddresses(src_list)
 
     # Single dict
     if isinstance(source, dict):
@@ -122,6 +125,9 @@ def extract_addresses(source) -> list[dict]:
     return result
 
 
+_HTML_MAX_BYTES = 500_000  # 500 KB cap for html2text processing
+
+
 def get_text(mail):
     raw_content, html_content, plain_content, html_quote, plain_quote = (
         "",
@@ -133,6 +139,8 @@ def get_text(mail):
 
     if mail.text_html:
         raw_content = "".join(mail.text_html).replace("\r\n", "\n")
+        if len(raw_content) > _HTML_MAX_BYTES:
+            raw_content = raw_content[:_HTML_MAX_BYTES]
         html_content, html_quote = strip_email_quote(raw_content)
         plain_content = html2text(html_content)
 
@@ -167,9 +175,9 @@ def get_auto_reply_type(mail):
 def get_to_plus(mail):
     to_plus = set(extract_emails(mail.to)) if mail.to else set()
 
-    to_plus.update(extract_emails(mail.delivered_to))
-    to_plus.update(extract_emails(mail.cc))
-    to_plus.update(extract_emails(mail.bcc))
+    to_plus.update(extract_emails(mail.delivered_to) if mail.delivered_to else [])
+    to_plus.update(extract_emails(mail.cc) if mail.cc else [])
+    to_plus.update(extract_emails(mail.bcc) if mail.bcc else [])
     to_plus.update(
         normalized
         for r in mail.received
@@ -201,7 +209,8 @@ def get_attachments(mail):
         if not filename or len(filename) > 255:
             filename = f"attachment_{uuid.uuid4().hex[:8]}"
 
-        decoder = decoder_map.get(attachment["content_transfer_encoding"])
+        raw_cte = (attachment["content_transfer_encoding"] or "").strip().lower()
+        decoder = decoder_map.get(raw_cte)
         if decoder is None:
             logging.getLogger("imap-to-webhook").warning(
                 "Unsupported CTE '%s' for attachment '%s' in %s, skipping",
@@ -214,7 +223,7 @@ def get_attachments(mail):
         try:
             content = decoder(attachment["payload"])
             attachments.append((filename, BytesIO(content), BINARY_MIME))
-        except (binascii.Error, ValueError):
+        except (binascii.Error, ValueError, AttributeError, TypeError):
             logging.getLogger("imap-to-webhook").warning(
                 "Unable to parse attachment '%s' in %s",
                 filename,
@@ -284,7 +293,7 @@ def get_manifest(mail, compress_eml, raw_bytes=None):
                 mail.references.split()
                 if isinstance(mail.references, str)
                 else (
-                    list(mail.references)
+                    [str(r) for r in mail.references]
                     if hasattr(mail.references, "__iter__")
                     else [str(mail.references)]
                 )

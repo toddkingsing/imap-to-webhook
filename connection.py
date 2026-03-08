@@ -5,32 +5,48 @@ logger = logging.getLogger("imap-to-webhook")
 
 class IMAPClient:
     def __init__(self, config):
+        self._config = config
+        self._connect(config)
+
+    def _connect(self, config):
         transport = config["imap"]["transport"]
         hostname = config["imap"]["hostname"]
         port = config["imap"]["port"]
         timeout = config["imap"].get("timeout", 60)
-        self.client = transport(host=hostname, port=port, timeout=timeout)
+        new_client = transport(host=hostname, port=port, timeout=timeout)
         username = config["imap"]["username"]
         password = config["imap"]["password"]
         logger.info("Connecting to mail server: %s", hostname)
         if username and password:
-            login = self.client.login(username, password)
+            login = new_client.login(username, password)
             if login[0] != "OK":
                 try:
-                    self.client.logout()
+                    new_client.logout()
                 except Exception:
                     pass
                 raise Exception("Unable to login", login)
         logger.info("Logged in as %s", username)
-        select_folder = self.client.select(config["imap"]["inbox"])
+        select_folder = new_client.select(config["imap"]["inbox"])
         if select_folder[0] != "OK":
             try:
-                self.client.logout()
+                new_client.logout()
             except Exception:
                 pass
             raise Exception("Unable to select folder", select_folder)
+        self.client = new_client
         self.on_success = config["imap"].get("on_success", "move")
         self.noop_flag = config["imap"].get("noop_flag", r"\Seen")
+
+    def reconnect(self):
+        """Close existing connection and re-establish."""
+        hostname = self._config["imap"]["hostname"]
+        logger.info("Attempting IMAP reconnect to %s", hostname)
+        try:
+            self.client.logout()
+        except Exception:
+            pass
+        self._connect(self._config)
+        logger.info("IMAP reconnected successfully to %s", hostname)
 
     def get_mail_ids(self):
         if self.on_success == "noop":
@@ -46,7 +62,7 @@ class IMAPClient:
             raise Exception(
                 f"Search failed: status={result_search}, data={data}"
             )
-        if data[0] is None:
+        if not data or data[0] is None:
             return []
         return data[0].decode("utf-8").split()
 
@@ -81,7 +97,7 @@ class IMAPClient:
 
     def move(self, msg_id, folder):
         logger.info("Going to move %s to %s", msg_id, folder)
-        self.copy(folder, msg_id)
+        self.copy(msg_id, folder)
         try:
             self.mark_delete(msg_id)
         except Exception as e:
@@ -95,19 +111,26 @@ class IMAPClient:
             raise
 
     def mark_delete(self, msg_id):
+        # Sets \Deleted flag — message is expunged on CLOSE/EXPUNGE
         logger.info("Going to mark as deleted %s", msg_id)
         delete_result, _ = self.client.uid("STORE", msg_id, "+FLAGS", r"(\Deleted)")
         if delete_result != "OK":
             raise Exception("Failed to mark as deleted msg {}".format(msg_id))
 
     def mark_seen(self, msg_id):
+        # Sets \Seen flag — message appears as "read" in mail clients
         logger.info("Marking message %s as seen", msg_id)
         result, _ = self.client.uid("STORE", msg_id, "+FLAGS", r"(\Seen)")
         if result != "OK":
             raise Exception("Failed to mark as seen msg {}".format(msg_id))
 
     def mark_processed(self, msg_id):
-        """Mark message with the configured noop flag."""
+        """Mark message with the configured noop flag.
+
+        Supports RFC 3501 system flags (\Seen, \Answered, \Flagged, \Deleted,
+        \Draft) and custom keywords ($WebhookProcessed, etc.).
+        Custom keywords require server PERMANENTFLAGS to include \*.
+        """
         logger.info(
             "Marking message %s as processed (flag: %s)", msg_id, self.noop_flag
         )
@@ -121,7 +144,7 @@ class IMAPClient:
                 f"Failed to mark msg {msg_id} as processed with flag {self.noop_flag}"
             )
 
-    def copy(self, folder, msg_id):
+    def copy(self, msg_id, folder):
         logger.info("Going to copy %s to %s", msg_id, folder)
         copy_result, data = self.client.uid("COPY", msg_id, folder)
         if copy_result != "OK":

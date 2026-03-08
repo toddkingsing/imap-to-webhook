@@ -378,7 +378,16 @@ def _harvest_from_first_hr(soup: BeautifulSoup, bucket: list[str]) -> None:
             sibling = sibling.next_sibling
         ancestor = ancestor.parent
 
-    for node in to_remove:
+    # Deduplicate: sibling walk + ancestor walk may collect the same node twice
+    seen_ids = set()
+    unique_to_remove = []
+    for n in to_remove:
+        nid = id(n)
+        if nid not in seen_ids:
+            seen_ids.add(nid)
+            unique_to_remove.append(n)
+
+    for node in unique_to_remove:
         if isinstance(node, Tag):
             _safe_append(bucket, _outer_html(node))
         elif isinstance(node, NavigableString) and str(node).strip():

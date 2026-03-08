@@ -11,22 +11,22 @@ TOO_LONG_SIGNATURE_LINE = 60
 # ---------------------------------------------------------------------------
 _PHONE_PATTERNS = [
     # English
-    r"sent\s+from\s+(?:my\s+)?\w[\w\s]*",
-    r"sent\s+from\s+(?:outlook|mail|mailbox)\s+for\s+\w[\w\s]*",
+    r"sent\s+from\s+(?:my\s+)?\w[\w ]{0,80}",
+    r"sent\s+from\s+(?:outlook|mail|mailbox)\s+for\s+\w[\w ]{0,80}",
     # French
-    r"envoy[ée]\s+depuis\s+mon\s+\w[\w\s]*",
+    r"envoy[ée]\s+depuis\s+mon\s+\w[\w ]{0,80}",
     # Polish
-    r"wys[lł]ano\s+z\s+(?:mojego\s+)?\w[\w\s]*",
+    r"wys[lł]ano\s+z\s+(?:mojego\s+)?\w[\w ]{0,80}",
     # Dutch
-    r"verzonden\s+vanaf\s+mijn\s+\w[\w\s]*",
+    r"verzonden\s+vanaf\s+mijn\s+\w[\w ]{0,80}",
     # German
-    r"gesendet\s+von\s+meinem?\s+\w[\w\s]*",
+    r"gesendet\s+von\s+meinem?\s+\w[\w ]{0,80}",
     # Norwegian / Danish
-    r"sendt\s+fra\s+min\s+\w[\w\s]*",
+    r"sendt\s+fra\s+min\s+\w[\w ]{0,80}",
     # Swedish
-    r"skickat\s+fr[aå]n\s+min\s+\w[\w\s]*",
+    r"skickat\s+fr[aå]n\s+min\s+\w[\w ]{0,80}",
     # Vietnamese
-    r"gửi\s+từ\s+\w[\w\s]*",
+    r"gửi\s+từ\s+\w[\w ]{0,80}",
     # Chinese simplified / traditional
     r"发自我的\s*\S+",
     r"從我的\s*\S+",
@@ -35,13 +35,13 @@ _PHONE_PATTERNS = [
     # Korean
     r"[내나]의?\s*(?:iPhone|iPad|Galaxy)에서\s*보냄",
     # Spanish
-    r"enviado\s+desde\s+mi\s+\w[\w\s]*",
+    r"enviado\s+desde\s+mi\s+\w[\w ]{0,80}",
     # Portuguese
-    r"enviado\s+(?:do|pelo)\s+meu\s+\w[\w\s]*",
+    r"enviado\s+(?:do|pelo)\s+meu\s+\w[\w ]{0,80}",
     # Italian
-    r"inviato\s+da[l]?\s+(?:mio\s+)?\w[\w\s]*",
+    r"inviato\s+da[l]?\s+(?:mio\s+)?\w[\w ]{0,80}",
     # Russian
-    r"отправлено\s+с\s+\w[\w\s]*",
+    r"отправлено\s+с\s+\w[\w ]{0,80}",
 ]
 
 RE_PHONE_SIGNATURE = re.compile(
@@ -192,10 +192,12 @@ def extract_signature(text):
                 return "\n".join(remaining).strip()
 
     # 3. Phone / device signature (fallback — usually last line)
+    # Restrict search to the same tail region as steps 1 & 2.
+    tail_text = "\n".join(lines[scan_start:])
     last_phone = None
-    for m in RE_PHONE_SIGNATURE.finditer(text):
+    for m in RE_PHONE_SIGNATURE.finditer(tail_text):
         last_phone = m
     if last_phone:
-        return text[last_phone.start():].strip()
+        return tail_text[last_phone.start():].strip()
 
     return ""

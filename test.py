@@ -2512,6 +2512,7 @@ class TestRetry(unittest.TestCase):
                 "success": "SUCCESS",
                 "refused": "REFUSED",
                 "timeout": 60,
+                "noop_flag": r"\Seen",
             },
             "webhook": "https://example.com/hook",
             "compress_eml": False,
@@ -2520,6 +2521,7 @@ class TestRetry(unittest.TestCase):
             "webhook_secret": "",
             "webhook_max_retries": 0,
             "webhook_retry_delay": 1,
+            "webhook_timeout": 90,
         }
         cfg.update(overrides)
         return cfg
@@ -2888,6 +2890,7 @@ class TestNoopMode(unittest.TestCase):
             "webhook_secret": "",
             "webhook_max_retries": 0,
             "webhook_retry_delay": 1,
+            "webhook_timeout": 90,
         }
         cfg.update(overrides)
         return cfg
@@ -3215,6 +3218,7 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
             "webhook_secret": "",
             "webhook_max_retries": 0,
             "webhook_retry_delay": 1,
+            "webhook_timeout": 90,
         }
         cfg.update(overrides)
         return cfg
@@ -3304,10 +3308,15 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
     def test_handle_success_fail_moves_to_error(self):
         from unittest.mock import MagicMock
 
-        from daemon import RESULT_SUCCESS, process_msg_from_raw
+        from daemon import RESULT_FAILED, process_msg_from_raw
 
         client = MagicMock()
-        client.move.side_effect = [Exception("SUCCESS folder gone"), None]
+        # Fail twice: original + reconnect retry, then ERROR move succeeds
+        client.move.side_effect = [
+            Exception("SUCCESS folder gone"),
+            Exception("still gone after reconnect"),
+            None,
+        ]
         session = MagicMock()
         response = MagicMock()
         response.status_code = 200
@@ -3321,15 +3330,16 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         result = process_msg_from_raw(
             client, "1", self._make_raw_mail(), config, session
         )
-        self.assertEqual(result, RESULT_SUCCESS)
-        # First move (SUCCESS) fails, second move (ERROR) succeeds
-        self.assertEqual(client.move.call_count, 2)
-        self.assertEqual(client.move.call_args_list[1][0], ("1", "ERROR"))
+        # Webhook delivered but post-delivery action failed → RESULT_FAILED
+        self.assertEqual(result, RESULT_FAILED)
+        # _handle_success: move(SUCCESS) fail + reconnect retry fail, then _safe_move(ERROR) succeeds
+        self.assertEqual(client.move.call_count, 3)
+        self.assertEqual(client.move.call_args_list[2][0], ("1", "ERROR"))
 
     def test_handle_success_fail_last_resort(self):
         from unittest.mock import MagicMock
 
-        from daemon import RESULT_SUCCESS, process_msg_from_raw
+        from daemon import RESULT_FAILED, process_msg_from_raw
 
         client = MagicMock()
         # All moves fail
@@ -3347,7 +3357,8 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         result = process_msg_from_raw(
             client, "1", self._make_raw_mail(), config, session
         )
-        self.assertEqual(result, RESULT_SUCCESS)
+        # Webhook delivered but post-delivery action failed → RESULT_FAILED
+        self.assertEqual(result, RESULT_FAILED)
         # Last resort: mark_delete for move mode
         client.mark_delete.assert_called_once_with("1")
 
@@ -3359,8 +3370,12 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         from daemon import RESULT_REFUSED, process_msg_from_raw
 
         client = MagicMock()
-        # First move (REFUSED) fails, second (ERROR) succeeds
-        client.move.side_effect = [Exception("REFUSED folder gone"), None]
+        # Fail twice: original + reconnect retry, then ERROR move succeeds
+        client.move.side_effect = [
+            Exception("REFUSED folder gone"),
+            Exception("still gone after reconnect"),
+            None,
+        ]
         session = MagicMock()
         response = MagicMock()
         response.status_code = 400
@@ -3373,8 +3388,9 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
             client, "1", self._make_raw_mail(), config, session
         )
         self.assertEqual(result, RESULT_REFUSED)
-        self.assertEqual(client.move.call_count, 2)
-        self.assertEqual(client.move.call_args_list[1][0], ("1", "ERROR"))
+        # _safe_move(REFUSED) fail + reconnect retry fail, then _safe_move(ERROR) succeeds
+        self.assertEqual(client.move.call_count, 3)
+        self.assertEqual(client.move.call_args_list[2][0], ("1", "ERROR"))
 
     def test_refused_both_fail_last_resort(self):
         from unittest.mock import MagicMock
@@ -3629,6 +3645,313 @@ class TestInfiniteLoopPrevention(unittest.TestCase):
         self.assertEqual(result, RESULT_FAILED)
         # Last resort: mark_delete for delete mode
         client.mark_delete.assert_called_once_with("1")
+
+
+class TestReconnect(unittest.TestCase):
+    """Tests for IMAP reconnect on post-delivery failures."""
+
+    def _make_config(self, **overrides):
+        cfg = {
+            "imap": {
+                "hostname": "localhost",
+                "username": "test",
+                "password": "test",
+                "protocol": "imap+ssl",
+                "port": 993,
+                "inbox": "INBOX",
+                "error": "ERROR",
+                "on_success": "move",
+                "success": "SUCCESS",
+                "refused": "REFUSED",
+                "timeout": 60,
+                "noop_flag": r"\Seen",
+            },
+            "webhook": "https://example.com/hook",
+            "compress_eml": False,
+            "delay": 60,
+            "sentry_dsn": None,
+            "webhook_secret": "",
+            "webhook_max_retries": 0,
+            "webhook_retry_delay": 1,
+            "webhook_timeout": 90,
+        }
+        cfg.update(overrides)
+        return cfg
+
+    def _make_raw_mail(self):
+        return (
+            b"From: sender@example.com\r\n"
+            b"To: recipient@example.com\r\n"
+            b"Subject: Test\r\n"
+            b"\r\n"
+            b"Body\r\n"
+        )
+
+    # --- _handle_success reconnect ---
+
+    def test_handle_success_reconnect_recovers(self):
+        """_handle_success reconnects and retries after IMAP failure."""
+        from unittest.mock import MagicMock
+
+        from daemon import _handle_success
+
+        client = MagicMock()
+        # First move fails (connection dead), second succeeds (after reconnect)
+        client.move.side_effect = [Exception("connection dead"), None]
+        config = self._make_config()
+        config["imap"]["on_success"] = "move"
+
+        result = _handle_success(client, "1", config)
+        self.assertTrue(result)
+        client.reconnect.assert_called_once()
+        self.assertEqual(client.move.call_count, 2)
+
+    def test_handle_success_reconnect_fails(self):
+        """_handle_success returns False when reconnect itself fails."""
+        from unittest.mock import MagicMock
+
+        from daemon import _handle_success
+
+        client = MagicMock()
+        client.move.side_effect = Exception("connection dead")
+        client.reconnect.side_effect = Exception("server unreachable")
+        config = self._make_config()
+        config["imap"]["on_success"] = "move"
+
+        result = _handle_success(client, "1", config)
+        self.assertFalse(result)
+        client.reconnect.assert_called_once()
+
+    def test_handle_success_noop_reconnect_recovers(self):
+        """_handle_success reconnects for noop mode too."""
+        from unittest.mock import MagicMock
+
+        from daemon import _handle_success
+
+        client = MagicMock()
+        client.mark_processed.side_effect = [Exception("dead"), None]
+        config = self._make_config()
+        config["imap"]["on_success"] = "noop"
+
+        result = _handle_success(client, "1", config)
+        self.assertTrue(result)
+        client.reconnect.assert_called_once()
+
+    # --- _safe_move reconnect ---
+
+    def test_safe_move_reconnect_recovers(self):
+        """_safe_move reconnects and retries after IMAP failure."""
+        from unittest.mock import MagicMock
+
+        from daemon import _safe_move
+
+        client = MagicMock()
+        client.move.side_effect = [Exception("connection dead"), None]
+
+        result = _safe_move(client, "1", "ERROR")
+        self.assertTrue(result)
+        client.reconnect.assert_called_once()
+
+    def test_safe_move_reconnect_fails(self):
+        """_safe_move returns False when reconnect fails."""
+        from unittest.mock import MagicMock
+
+        from daemon import _safe_move
+
+        client = MagicMock()
+        client.move.side_effect = Exception("connection dead")
+        client.reconnect.side_effect = Exception("server unreachable")
+
+        result = _safe_move(client, "1", "ERROR")
+        self.assertFalse(result)
+
+    def test_safe_move_reconnect_retry_also_fails(self):
+        """_safe_move returns False when retry after reconnect also fails."""
+        from unittest.mock import MagicMock
+
+        from daemon import _safe_move
+
+        client = MagicMock()
+        client.move.side_effect = Exception("always fails")
+
+        result = _safe_move(client, "1", "ERROR")
+        self.assertFalse(result)
+        self.assertEqual(client.move.call_count, 2)  # original + retry
+
+    # --- _last_resort_mark reconnect ---
+
+    def test_last_resort_reconnect_recovers(self):
+        """_last_resort_mark reconnects after failure."""
+        from unittest.mock import MagicMock
+
+        from daemon import _last_resort_mark
+
+        client = MagicMock()
+        client.mark_delete.side_effect = [Exception("dead"), None]
+        config = self._make_config()
+        config["imap"]["on_success"] = "move"
+
+        _last_resort_mark(client, "1", config)
+        client.reconnect.assert_called_once()
+        self.assertEqual(client.mark_delete.call_count, 2)
+
+    def test_last_resort_reconnect_total_failure(self):
+        """_last_resort_mark logs critical when everything fails."""
+        from unittest.mock import MagicMock, patch as mock_patch
+
+        from daemon import _last_resort_mark
+
+        client = MagicMock()
+        client.mark_delete.side_effect = Exception("dead forever")
+        client.reconnect.side_effect = Exception("unreachable")
+        config = self._make_config()
+        config["imap"]["on_success"] = "move"
+
+        with mock_patch("daemon.logger") as mock_logger:
+            _last_resort_mark(client, "1", config)
+            mock_logger.critical.assert_called_once()
+
+    # --- Full flow: reconnect saves delivered messages ---
+
+    def test_delivered_msg_saved_by_reconnect(self):
+        """A successfully delivered message is marked via reconnect when
+        original IMAP connection died during webhook retries."""
+        from unittest.mock import MagicMock
+
+        from daemon import RESULT_SUCCESS, process_msg_from_raw
+
+        client = MagicMock()
+        # First mark_processed fails (IMAP dead), after reconnect it succeeds
+        client.mark_processed.side_effect = [Exception("SSL EOF"), None]
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 200
+        response.text = '{"status":"OK"}'
+        response.json.return_value = {"status": "OK"}
+        response.raise_for_status.return_value = None
+        session.post.return_value = response
+        config = self._make_config()
+        config["imap"]["on_success"] = "noop"
+
+        result = process_msg_from_raw(
+            client, "1", self._make_raw_mail(), config, session
+        )
+        self.assertEqual(result, RESULT_SUCCESS)
+        client.reconnect.assert_called_once()
+        self.assertEqual(client.mark_processed.call_count, 2)
+
+    # --- IMAPClient.reconnect ---
+
+    def test_imap_client_reconnect(self):
+        """IMAPClient.reconnect() creates a new connection."""
+        from unittest.mock import MagicMock, patch as mock_patch
+
+        import imaplib
+
+        mock_transport = MagicMock(spec=imaplib.IMAP4_SSL)
+        mock_instance = MagicMock()
+        mock_instance.login.return_value = ("OK", [b"Logged in"])
+        mock_instance.select.return_value = ("OK", [b"1"])
+        mock_transport.return_value = mock_instance
+
+        config = {
+            "imap": {
+                "transport": mock_transport,
+                "hostname": "imap.test.com",
+                "port": 993,
+                "username": "user",
+                "password": "pass",
+                "inbox": "INBOX",
+                "on_success": "noop",
+                "noop_flag": r"\Seen",
+                "timeout": 60,
+            }
+        }
+
+        from connection import IMAPClient
+
+        client = IMAPClient(config)
+        self.assertEqual(mock_transport.call_count, 1)
+
+        # Reconnect
+        client.reconnect()
+        self.assertEqual(mock_transport.call_count, 2)  # new connection created
+        mock_instance.login.assert_called_with("user", "pass")
+
+
+class TestWebhookTimeout(unittest.TestCase):
+    """Tests for configurable WEBHOOK_TIMEOUT."""
+
+    def test_default_timeout(self):
+        from config import get_config
+
+        env = {
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "WEBHOOK_URL": "https://example.com/hook",
+        }
+        cfg = get_config(env)
+        self.assertEqual(cfg["webhook_timeout"], 90)
+
+    def test_custom_timeout(self):
+        from config import get_config
+
+        env = {
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "WEBHOOK_URL": "https://example.com/hook",
+            "WEBHOOK_TIMEOUT": "120",
+        }
+        cfg = get_config(env)
+        self.assertEqual(cfg["webhook_timeout"], 120)
+
+    def test_invalid_timeout_raises(self):
+        from config import get_config
+
+        env = {
+            "IMAP_URL_1": "imap+ssl://user%40test.com:pass@imap.test.com:993/",
+            "WEBHOOK_URL": "https://example.com/hook",
+            "WEBHOOK_TIMEOUT": "0",
+        }
+        with self.assertRaises(EnvironmentError):
+            get_config(env)
+
+    def test_timeout_used_in_post(self):
+        """process_msg_from_raw passes webhook_timeout to session.post."""
+        from unittest.mock import MagicMock
+
+        from daemon import process_msg_from_raw
+
+        client = MagicMock()
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 200
+        response.text = '{"status":"OK"}'
+        response.json.return_value = {"status": "OK"}
+        response.raise_for_status.return_value = None
+        session.post.return_value = response
+
+        config = {
+            "imap": {
+                "on_success": "noop",
+                "noop_flag": r"\Seen",
+                "error": "ERROR",
+            },
+            "webhook": "https://example.com/hook",
+            "compress_eml": False,
+            "webhook_max_retries": 0,
+            "webhook_retry_delay": 1,
+            "webhook_timeout": 120,
+        }
+
+        raw_mail = (
+            b"From: sender@example.com\r\n"
+            b"To: recipient@example.com\r\n"
+            b"Subject: Test\r\n"
+            b"\r\n"
+            b"Body\r\n"
+        )
+        process_msg_from_raw(client, "1", raw_mail, config, session)
+        _, kwargs = session.post.call_args
+        self.assertEqual(kwargs["timeout"], 120)
 
 
 class TestSignature(unittest.TestCase):
@@ -3933,6 +4256,121 @@ class TestSignature(unittest.TestCase):
             for line in sig.splitlines():
                 if line.strip():
                     self.assertIn(line.strip(), content)
+
+
+class TestCompressEml(unittest.TestCase):
+    """Tests for COMPRESS_EML=true gzip path."""
+
+    def test_get_eml_compressed_is_valid_gzip(self):
+        from mail_parser import get_eml
+        import gzip
+
+        raw = b"Subject: test\r\n\r\nHello"
+        compressed = get_eml(raw, compress_eml=True)
+        self.assertIsInstance(compressed, bytes)
+        self.assertGreater(len(compressed), 0)
+        decompressed = gzip.decompress(compressed)
+        self.assertEqual(decompressed, raw)
+
+    def test_get_eml_uncompressed_passthrough(self):
+        from mail_parser import get_eml
+
+        raw = b"Subject: test\r\n\r\nHello"
+        result = get_eml(raw, compress_eml=False)
+        self.assertEqual(result, raw)
+
+    def test_serialize_mail_compressed_eml_name_and_mime(self):
+        mail = get_email_as_bytes("html_only.eml")
+        body = serialize_mail(mail, compress_eml=True)
+        body_map = {k: v for k, v in body}
+        eml_name, eml_stream, eml_mime = body_map["eml"]
+        self.assertTrue(eml_name.endswith(".eml.gz"))
+        self.assertEqual(eml_mime, "application/gzip")
+        # Verify the content is valid gzip
+        import gzip
+        content = eml_stream.read()
+        self.assertGreater(len(content), 0)
+        decompressed = gzip.decompress(content)
+        self.assertEqual(decompressed, mail)
+
+    def test_serialize_mail_uncompressed_eml_name_and_mime(self):
+        mail = get_email_as_bytes("html_only.eml")
+        body = serialize_mail(mail, compress_eml=False)
+        body_map = {k: v for k, v in body}
+        eml_name, eml_stream, eml_mime = body_map["eml"]
+        self.assertTrue(eml_name.endswith(".eml"))
+        self.assertFalse(eml_name.endswith(".eml.gz"))
+        self.assertEqual(eml_mime, "message/rfc822")
+
+
+class TestConfigParsing(unittest.TestCase):
+    """Tests for config.py edge cases."""
+
+    def _base_env(self):
+        return {
+            "WEBHOOK_URL": "https://example.com/hook",
+            "IMAP_URL_1": "imap+ssl://user:pass@mail.example.com:993",
+        }
+
+    def test_compress_eml_true_string(self):
+        from config import get_config
+
+        env = {**self._base_env(), "COMPRESS_EML": "true"}
+        cfg = get_config(env)
+        self.assertTrue(cfg["compress_eml"])
+
+    def test_compress_eml_false_string(self):
+        from config import get_config
+
+        env = {**self._base_env(), "COMPRESS_EML": "false"}
+        cfg = get_config(env)
+        self.assertFalse(cfg["compress_eml"])
+
+    def test_compress_eml_yes(self):
+        from config import get_config
+
+        env = {**self._base_env(), "COMPRESS_EML": "yes"}
+        cfg = get_config(env)
+        self.assertTrue(cfg["compress_eml"])
+
+    def test_compress_eml_1(self):
+        from config import get_config
+
+        env = {**self._base_env(), "COMPRESS_EML": "1"}
+        cfg = get_config(env)
+        self.assertTrue(cfg["compress_eml"])
+
+    def test_compress_eml_invalid_is_false(self):
+        from config import get_config
+
+        env = {**self._base_env(), "COMPRESS_EML": "enabled"}
+        cfg = get_config(env)
+        self.assertFalse(cfg["compress_eml"])
+
+    def test_invalid_delay_raises(self):
+        from config import get_config
+
+        env = {**self._base_env(), "DELAY": "five"}
+        with self.assertRaises(EnvironmentError) as ctx:
+            get_config(env)
+        self.assertIn("DELAY", str(ctx.exception))
+        self.assertIn("five", str(ctx.exception))
+
+    def test_invalid_batch_size_raises(self):
+        from config import get_config
+
+        env = {**self._base_env(), "BATCH_SIZE": "abc"}
+        with self.assertRaises(EnvironmentError) as ctx:
+            get_config(env)
+        self.assertIn("BATCH_SIZE", str(ctx.exception))
+
+    def test_invalid_webhook_timeout_raises(self):
+        from config import get_config
+
+        env = {**self._base_env(), "WEBHOOK_TIMEOUT": "slow"}
+        with self.assertRaises(EnvironmentError) as ctx:
+            get_config(env)
+        self.assertIn("WEBHOOK_TIMEOUT", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -70,6 +70,8 @@ def is_splitter(line):
     Returns Matcher object if provided string is a splitter and
     None otherwise.
     """
+    if len(line) > _MAX_BODY_FOR_SPLITTER_RE:
+        return None
     for pattern in const.SPLITTER_PATTERNS:
         matcher = re.match(pattern, line)
         if matcher:
